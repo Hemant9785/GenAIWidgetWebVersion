@@ -1,0 +1,17 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+packages/server/.env
+
+# Dependency directories
+node_modules/
+**/node_modules/
+
+# Build outputs and logs
+dist/
+build/
+logs.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
