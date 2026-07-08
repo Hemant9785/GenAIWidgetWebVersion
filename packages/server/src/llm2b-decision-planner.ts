@@ -1,5 +1,5 @@
 // ============================================================
-// GenUI Widget Platform - Variable Planner
+// GenUI Widget Platform - Decision Agent (LLM-2B)
 // ============================================================
 
 import type {
@@ -14,7 +14,7 @@ import type {
   DomainToolExecutor,
 } from './types.js';
 
-export class LLM2Planner implements VariablePlanner {
+export class LLM2BDecisionPlanner implements VariablePlanner {
   private provider: LLMProvider;
   private defaultToolHandler: DefaultToolHandler;
   private domainToolExecutor: DomainToolExecutor;
@@ -33,29 +33,23 @@ export class LLM2Planner implements VariablePlanner {
   }
 
   async plan(input: VariablePlannerInput): Promise<VariablePlannerOutput> {
-    const model = process.env.LLM2_MODEL || this.defaultModel;
+    const model = process.env.LLM2B_MODEL || this.defaultModel;
     const tool_call_trace: ToolCallTraceEntry[] = [];
 
-    const systemPrompt = `You are the Variable Planner for a plugin-based dynamic widget platform.
-Your task is to plan the variables and static assets required to render a user widget.
+    const systemPrompt = `You are the Decision Agent (LLM-2B) for a plugin-based dynamic widget platform.
+Your task is to analyze advice, recommendation, summary, or suggestion queries for the "${input.domain}" domain, fetch the required raw data, reason on the numbers, and output a set of static variables containing the recommendation.
 
-You must determine:
-1. What data (variables) needs to be fetched, and which backend tools should fetch it.
-2. What static assets are needed.
+To accomplish this:
+1. You have access to both DEFAULT TOOLS (list/read registry) and DOMAIN-SPECIFIC TOOLS (fetch weather, history, etc.).
+2. You MUST run an agentic loop:
+   - Call default tools to discover domain capabilities.
+   - CALL DOMAIN TOOLS DIRECTLY INSIDE THIS PLANNING PHASE to fetch the real data. Since the query requires reasoning/advice, you cannot delegate data fetching to the resolver later.
+   - Inspect the returned raw JSON data, perform reasoning, and form your recommendation.
+3. Once you have made the decision, output the final plan in JSON format.
+4. Your output variables MUST be of type "static" (value contains the raw advice details). This ensures the resolved values are immediately available to the layout engine without any resolver queries.
+5. VIRTUAL DOMAIN: If the target domain is "general", you DO NOT need to call any domain-specific tools or default tools. Instead, immediately answer the query directly using your internal pre-trained knowledge base. Define a static variable (usually named "generalInfo") containing detailed, structured answer attributes. IMPORTANT: If there are lists, recommendations, or tables of items (such as multiple countries, facts, steps, or features), you MUST represent them as arrays of objects (e.g., countries: [{ name: "Italy", description: "..." }] or facts: [{ title: "...", detail: "..." }]) instead of raw key-value objects. This allows the layout engine to map a List component over them cleanly.
 
-To accomplish this, you have access to both:
-- DEFAULT TOOLS: List/read available skills and tools in the registry.
-- DOMAIN-SPECIFIC TOOLS: Fetch actual domain data (e.g. coordinates, events).
-
-You should work in an agentic loop:
-1. Use default tools (\`list_skills\`, \`list_tools\`, \`read_skill\`, \`read_tool\`) to discover what specific files and APIs are supported by the "${input.domain}" domain and how they work.
-2. If you need to resolve ambiguous query parameters (e.g. city names, ticker symbols) to get coordinates or internal IDs, call the geocode/search tool inside this planning phase immediately so the resolved parameters can be embedded as static.
-3. Once you have all the information, output the final plan.
-
-DO NOT call domain tools to fetch final transactional/large data directly if it should be done by the resolver at runtime.
-Define variables with a tool-backed source (e.g. \`/tool/weather/forecast\`) with parameters (e.g. latitude: "{{location.latitude}}"). The resolver will fetch it at runtime.
-
-When you are ready to finish, respond in JSON format with the final plan:
+EXPECTED JSON OUTPUT STRUCTURE:
 {
   "status": "finish",
   "clarification_required": false,
@@ -67,50 +61,48 @@ When you are ready to finish, respond in JSON format with the final plan:
       "source": {
         "type": "static",
         "value": {
-          "latitude": 42.3601,
-          "longitude": -71.0589,
-          "name": "Boston",
-          "timezone": "America/New_York"
+          "name": "Bangalore",
+          "latitude": 12.9716,
+          "longitude": 77.5946
         }
       },
       "importance": "required"
     },
     {
-      "variable_name": "eventList",
-      "variable_type": "array",
-      "semantic_type": "upcoming_events",
+      "variable_name": "decisionAdvice",
+      "variable_type": "object",
+      "semantic_type": "recommendation_advice",
       "source": {
-        "type": "tool",
-        "tool_path": "/tool/entertainment/events",
-        "parameters": {
-          "latitude": "{{location.latitude}}",
-          "longitude": "{{location.longitude}}",
-          "category": "music",
-          "timezone": "{{location.timezone}}"
+        "type": "static",
+        "value": {
+          "recommendation": "Yes, carry an umbrella!",
+          "reason": " Bangalore has an 85% probability of rain today with moderate showers expected.",
+          "severity": "medium",
+          "color": "#ff9f43"
         }
       },
       "importance": "required"
     }
   ],
-  "assets": ["/asset/entertainment/icons"]
+  "assets": []
 }
 
 # Few-Shot Agentic Loop Trace Example
-User Query: "show me upcoming music events in Boston"
+User Query: "should I carry an umbrella today in Bangalore?"
 
-1. ASSISTANT calls \`list_skills(domain: "entertainment")\` -> returns \`[{"path":"/skill/entertainment/events"}]\`
-2. ASSISTANT calls \`list_tools(domain: "entertainment")\` -> returns \`[{"path":"/tool/entertainment/events"}, {"path":"/tool/entertainment/geocode"}]\`
-3. ASSISTANT calls \`read_tool(path: "/tool/entertainment/geocode")\` -> returns parameters schema: \`name\` (required)
-4. ASSISTANT calls \`tool__entertainment__geocode(name: "Boston")\` -> returns coordinates \`{ latitude: 42.3601, longitude: -71.0589, name: "Boston", timezone: "America/New_York" }\`
-5. ASSISTANT calls \`read_tool(path: "/tool/entertainment/events")\` -> returns parameters schema: \`latitude\`, \`longitude\`, \`category\`, \`timezone\`
-6. ASSISTANT outputs final plan as JSON (finish status, static location variable, and tool-backed eventList variable with category "music").
+1. ASSISTANT calls list_tools(domain: "weather") -> returns tool definitions.
+2. ASSISTANT calls read_tool(path: "/tool/weather/forecast") -> reads parameter options.
+3. ASSISTANT calls tool__weather__geocode(name: "Bangalore") -> returns lat/lng.
+4. ASSISTANT calls tool__weather__forecast(latitude: 12.97, longitude: 77.59, daily: ["weather_code", "precipitation_probability_max"]) -> returns rain probability of 85%.
+5. ASSISTANT reasons: "The weather forecast reports an 85% rain probability today. Therefore, the user should carry an umbrella."
+6. ASSISTANT outputs finish status JSON with static variable location and static variable umbrellaAdvice holding the recommendation.
 
 Current Domain: ${input.domain}
 User Query: "${input.user_query}"`;
 
     const messages: Message[] = [
       { role: 'system', content: systemPrompt },
-      { role: 'user', content: `Analyze this query and create a variable plan: "${input.user_query}"` }
+      { role: 'user', content: `Analyze this query and generate the decision plan: "${input.user_query}"` }
     ];
 
     const tools: ToolDefinition[] = [...input.default_tools, ...input.domain_tools];
@@ -192,7 +184,7 @@ User Query: "${input.user_query}"`;
           });
         }
       } catch (err) {
-        console.error('Variable Planner iteration error:', err);
+        console.error('Decision Agent iteration error:', err);
         return {
           status: 'error',
           clarification_required: false,
@@ -207,7 +199,7 @@ User Query: "${input.user_query}"`;
     return {
       status: 'error',
       clarification_required: true,
-      clarification_message: 'Max iterations reached in agentic planning loop.',
+      clarification_message: 'Max iterations reached in agentic decision loop.',
       variables: [],
       assets: [],
       tool_call_trace,

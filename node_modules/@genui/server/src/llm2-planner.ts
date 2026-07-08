@@ -1,5 +1,5 @@
 // ============================================================
-// GenUI Widget Platform - LLM-2 Variable Planner
+// GenUI Widget Platform - Variable Planner
 // ============================================================
 
 import type {
@@ -36,7 +36,7 @@ export class LLM2Planner implements VariablePlanner {
     const model = process.env.LLM2_MODEL || this.defaultModel;
     const tool_call_trace: ToolCallTraceEntry[] = [];
 
-    const systemPrompt = `You are the LLM-2 Variable Planner for a plugin-based GenUI widget platform.
+    const systemPrompt = `You are the Variable Planner for a plugin-based dynamic widget platform.
 Your task is to plan the variables and static assets required to render a user widget.
 
 You must determine:
@@ -45,16 +45,15 @@ You must determine:
 
 To accomplish this, you have access to both:
 - DEFAULT TOOLS: List/read available skills and tools in the registry.
-- DOMAIN-SPECIFIC TOOLS: Fetch actual domain data (e.g. weather forecast, coordinates).
+- DOMAIN-SPECIFIC TOOLS: Fetch actual domain data (e.g. coordinates, events).
 
 You should work in an agentic loop:
-1. Use default tools (\`list_skills\`, \`read_skill\`, \`read_tool\`) to discover what variables are supported by the "${input.domain}" domain and how the domain tools work.
-2. If you need to resolve ambiguous locations (e.g., city names in the query like "Bangalore"), call the geocoding tool (\`tool__weather__geocode\`) during planning to get the coordinates.
+1. Use default tools (\`list_skills\`, \`list_tools\`, \`read_skill\`, \`read_tool\`) to discover what specific files and APIs are supported by the "${input.domain}" domain and how they work.
+2. If you need to resolve ambiguous query parameters (e.g. city names, ticker symbols) to get coordinates or internal IDs, call the geocode/search tool inside this planning phase immediately so the resolved parameters can be embedded as static.
 3. Once you have all the information, output the final plan.
 
-DO NOT call domain tools to fetch weather data directly if it should be done by the resolver at runtime.
-For example, if you need 7-day forecast data, define a variable with a tool-backed source (e.g., \`/tool/weather/forecast\`) with parameters (e.g. latitude: "{{location.latitude}}"). The platform will fetch it.
-Only call tools during planning if you need to resolve specific static details (like geocoding a city to coordinates).
+DO NOT call domain tools to fetch final transactional/large data directly if it should be done by the resolver at runtime.
+Define variables with a tool-backed source (e.g. \`/tool/weather/forecast\`) with parameters (e.g. latitude: "{{location.latitude}}"). The resolver will fetch it at runtime.
 
 When you are ready to finish, respond in JSON format with the final plan:
 {
@@ -68,36 +67,43 @@ When you are ready to finish, respond in JSON format with the final plan:
       "source": {
         "type": "static",
         "value": {
-          "latitude": 12.9716,
-          "longitude": 77.5946,
-          "name": "Bangalore",
-          "timezone": "Asia/Kolkata"
+          "latitude": 42.3601,
+          "longitude": -71.0589,
+          "name": "Boston",
+          "timezone": "America/New_York"
         }
       },
       "importance": "required"
     },
     {
-      "variable_name": "dailyForecast",
+      "variable_name": "eventList",
       "variable_type": "array",
-      "semantic_type": "daily_weather_forecast",
+      "semantic_type": "upcoming_events",
       "source": {
         "type": "tool",
-        "tool_path": "/tool/weather/forecast",
+        "tool_path": "/tool/entertainment/events",
         "parameters": {
           "latitude": "{{location.latitude}}",
           "longitude": "{{location.longitude}}",
-          "forecast_days": 7,
-          "daily": ["weather_code", "temperature_2m_max", "temperature_2m_min", "precipitation_probability_max"],
+          "category": "music",
           "timezone": "{{location.timezone}}"
         }
       },
       "importance": "required"
     }
   ],
-  "assets": ["/asset/weather/icons"]
+  "assets": ["/asset/entertainment/icons"]
 }
 
-If the user request is ambiguous and you cannot proceed even after trying tools, set clarification_required = true and provide a clarification_message.
+# Few-Shot Agentic Loop Trace Example
+User Query: "show me upcoming music events in Boston"
+
+1. ASSISTANT calls \`list_skills(domain: "entertainment")\` -> returns \`[{"path":"/skill/entertainment/events"}]\`
+2. ASSISTANT calls \`list_tools(domain: "entertainment")\` -> returns \`[{"path":"/tool/entertainment/events"}, {"path":"/tool/entertainment/geocode"}]\`
+3. ASSISTANT calls \`read_tool(path: "/tool/entertainment/geocode")\` -> returns parameters schema: \`name\` (required)
+4. ASSISTANT calls \`tool__entertainment__geocode(name: "Boston")\` -> returns coordinates \`{ latitude: 42.3601, longitude: -71.0589, name: "Boston", timezone: "America/New_York" }\`
+5. ASSISTANT calls \`read_tool(path: "/tool/entertainment/events")\` -> returns parameters schema: \`latitude\`, \`longitude\`, \`category\`, \`timezone\`
+6. ASSISTANT outputs final plan as JSON (finish status, static location variable, and tool-backed eventList variable with category "music").
 
 Current Domain: ${input.domain}
 User Query: "${input.user_query}"`;
@@ -107,7 +113,6 @@ User Query: "${input.user_query}"`;
       { role: 'user', content: `Analyze this query and create a variable plan: "${input.user_query}"` }
     ];
 
-    // Combine default tools and domain tools
     const tools: ToolDefinition[] = [...input.default_tools, ...input.domain_tools];
 
     const MAX_ITERATIONS = 10;
@@ -120,13 +125,9 @@ User Query: "${input.user_query}"`;
           model,
           messages,
           tools: tools.length > 0 ? tools : undefined,
-          // Only force JSON if we're not planning to call tools, but GPT-4o manages tool calls + JSON mode dynamically.
-          // Wait, OpenAI doesn't allow tools + response_format: json_object in some older models, but in newer ones it does.
-          // To be safe, we don't pass response_format when tools are provided, but we instruct it in the system prompt.
           temperature: 0.1,
         });
 
-        // Add assistant response to history
         messages.push({
           role: 'assistant',
           content: response.content,
@@ -134,7 +135,6 @@ User Query: "${input.user_query}"`;
         });
 
         if (!response.tool_calls || response.tool_calls.length === 0) {
-          // Final response
           const content = response.content || '{}';
           const cleanJson = this.extractJson(content);
           const parsed = JSON.parse(cleanJson);
@@ -150,7 +150,6 @@ User Query: "${input.user_query}"`;
           };
         }
 
-        // Execute tool calls
         for (const toolCall of response.tool_calls) {
           const fnName = toolCall.function.name;
           const fnArgs = JSON.parse(toolCall.function.arguments || '{}');
@@ -170,7 +169,6 @@ User Query: "${input.user_query}"`;
             } else if (fnName === 'read_tool') {
               result = await this.defaultToolHandler.readTool(fnArgs.path);
             } else if (fnName.startsWith('tool__')) {
-              // Convert tool__weather__forecast -> /tool/weather/forecast
               const toolPath = '/' + fnName.replace(/__/g, '/');
               result = await this.domainToolExecutor.execute(toolPath, fnArgs);
             } else {
@@ -194,7 +192,7 @@ User Query: "${input.user_query}"`;
           });
         }
       } catch (err) {
-        console.error('LLM-2 Variable Planner iteration error:', err);
+        console.error('Variable Planner iteration error:', err);
         return {
           status: 'error',
           clarification_required: false,
@@ -218,11 +216,8 @@ User Query: "${input.user_query}"`;
   }
 
   private extractJson(content: string): string {
-    // If wrapped in markdown block
     const match = content.match(/```json\s*([\s\S]*?)\s*```/);
     if (match) return match[1];
-    
-    // Otherwise return as is, but strip leading/trailing whitespace
     return content.trim();
   }
 }

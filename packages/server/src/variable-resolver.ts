@@ -253,14 +253,34 @@ export class PlaceholderSubstituter {
     const regex = /^([^[\]]+)(?:\[(\d+)\])?$/;
     const parts = path.split('.');
     let current = obj;
-    for (const part of parts) {
+    for (let i = 0; i < parts.length; i++) {
       if (current === null || current === undefined) return undefined;
       
+      const part = parts[i];
       const match = part.match(regex);
       if (!match) return undefined;
       
       const key = match[1];
       const index = match[2];
+      
+      // Check if we have a mismatch like daily[0].weather_code where daily is actually an object containing arrays
+      const nextPart = parts[i + 1];
+      if (index !== undefined && nextPart !== undefined) {
+        const nested = current[key];
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+          // If daily is an object and has daily.weather_code array
+          const nextMatch = nextPart.match(regex);
+          const nextKey = nextMatch ? nextMatch[1] : nextPart;
+          const targetArray = nested[nextKey];
+          if (Array.isArray(targetArray)) {
+            const resolvedValue = targetArray[parseInt(index, 10)];
+            // Skip the next segment since we processed it here
+            i++;
+            current = resolvedValue;
+            continue;
+          }
+        }
+      }
       
       current = current[key];
       

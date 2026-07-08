@@ -67,11 +67,10 @@ export interface RouterOutput {
     tools: string[];
     assets: string[];
   };
-  domain: string;
-  sub_intent: string;
   confidence: number;
-  clarification_required: boolean;
+  clarification_required?: boolean;
   reason: string;
+  is_decision_query?: boolean;
 }
 
 export interface CapabilityRouter {
@@ -199,7 +198,14 @@ export interface VariableResolver {
 export interface VariableDefinitionSummary {
   name: string;
   type: string;
+  semantic_type?: string;
   description?: string;
+  structure?: any;
+  source_info?: {
+    type: string;
+    tool_path?: string;
+    parameters?: any;
+  };
 }
 
 export interface LayoutInput {
