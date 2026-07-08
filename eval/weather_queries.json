@@ -1,0 +1,52 @@
+[
+  {
+    "query": "Create a weather widget for Bangalore",
+    "expected_paths": {
+      "skills": ["/skill/weather/weather"],
+      "tools": ["/tool/weather/forecast", "/tool/weather/geocode"],
+      "assets": ["/asset/weather/icons"]
+    },
+    "expected_variables": ["location", "currentWeather"],
+    "expected_tools": ["/tool/weather/geocode", "/tool/weather/forecast"]
+  },
+  {
+    "query": "Show 7 day forecast for Delhi",
+    "expected_paths": {
+      "skills": ["/skill/weather/weather"],
+      "tools": ["/tool/weather/forecast", "/tool/weather/geocode"],
+      "assets": ["/asset/weather/icons"]
+    },
+    "expected_variables": ["location", "dailyForecast"],
+    "expected_tools": ["/tool/weather/geocode", "/tool/weather/forecast"]
+  },
+  {
+    "query": "Will it rain tomorrow in Mumbai?",
+    "expected_paths": {
+      "skills": ["/skill/weather/weather"],
+      "tools": ["/tool/weather/forecast", "/tool/weather/geocode"],
+      "assets": ["/asset/weather/icons"]
+    },
+    "expected_variables": ["location", "dailyForecast"],
+    "expected_tools": ["/tool/weather/geocode", "/tool/weather/forecast"]
+  },
+  {
+    "query": "Show AQI and temperature for Bangalore",
+    "expected_paths": {
+      "skills": ["/skill/weather/weather"],
+      "tools": ["/tool/weather/forecast", "/tool/weather/air-quality", "/tool/weather/geocode"],
+      "assets": ["/asset/weather/icons"]
+    },
+    "expected_variables": ["location", "currentWeather", "airQuality"],
+    "expected_tools": ["/tool/weather/geocode", "/tool/weather/forecast", "/tool/weather/air-quality"]
+  },
+  {
+    "query": "Hourly weather tonight in Hyderabad",
+    "expected_paths": {
+      "skills": ["/skill/weather/weather"],
+      "tools": ["/tool/weather/forecast", "/tool/weather/geocode"],
+      "assets": ["/asset/weather/icons"]
+    },
+    "expected_variables": ["location", "hourlyForecast"],
+    "expected_tools": ["/tool/weather/geocode", "/tool/weather/forecast"]
+  }
+]

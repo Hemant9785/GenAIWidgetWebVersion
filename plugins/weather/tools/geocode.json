@@ -1,0 +1,26 @@
+{
+  "name": "geocode",
+  "description": "Search for locations by name using Open-Meteo Geocoding API. Returns coordinates, timezone, country, and population for matching cities and places.",
+  "endpoint": "https://geocoding-api.open-meteo.com/v1/search",
+  "method": "GET",
+  "parameters": {
+    "type": "object",
+    "required": ["name"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Location name to search for (city, town, postal code). Minimum 2 characters."
+      },
+      "count": {
+        "type": "integer",
+        "description": "Number of results to return (max 100). Default: 5",
+        "default": 5
+      },
+      "language": {
+        "type": "string",
+        "description": "Language code for localized names (e.g., 'en', 'de', 'fr'). Default: 'en'",
+        "default": "en"
+      }
+    }
+  }
+}

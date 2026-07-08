@@ -1,0 +1,30 @@
+{
+  "domain": "finance",
+  "name": "Finance Plugin",
+  "version": "1.0.0",
+  "description": "Mock finance plugin for portfolio, stock price checking, and simple charts.",
+  "skills": [
+    {
+      "path": "/skill/finance/portfolio",
+      "name": "portfolio",
+      "file": "skills/finance.md",
+      "description": "Finance capabilities: current stock prices, portfolio performance, and asset allocation summaries."
+    }
+  ],
+  "tools": [
+    {
+      "path": "/tool/finance/stock-price",
+      "name": "stock-price",
+      "file": "tools/stock-price.json",
+      "description": "Get current stock price, historical closing prices, and change percentages for a given stock symbol."
+    }
+  ],
+  "assets": [
+    {
+      "path": "/asset/finance/charts",
+      "name": "charts",
+      "file": "assets/charts.json",
+      "description": "Mock stock chart templates and styling configs."
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "historical",
+  "description": "Get historical weather data from Open-Meteo Historical Archive API. Access ERA5 reanalysis data from 1940 to present with ~5 day lag.",
+  "endpoint": "https://archive-api.open-meteo.com/v1/archive",
+  "method": "GET",
+  "parameters": {
+    "type": "object",
+    "required": ["latitude", "longitude", "start_date", "end_date"],
+    "properties": {
+      "latitude": {
+        "type": "number",
+        "description": "WGS84 latitude (-90 to 90)"
+      },
+      "longitude": {
+        "type": "number",
+        "description": "WGS84 longitude (-180 to 180)"
+      },
+      "start_date": {
+        "type": "string",
+        "description": "Start date in yyyy-mm-dd format"
+      },
+      "end_date": {
+        "type": "string",
+        "description": "End date in yyyy-mm-dd format"
+      },
+      "hourly": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Hourly variables. Options: temperature_2m, relative_humidity_2m, dewpoint_2m, apparent_temperature, precipitation, rain, snowfall, snow_depth, weather_code, pressure_msl, surface_pressure, cloud_cover, wind_speed_10m, wind_direction_10m, wind_gusts_10m, shortwave_radiation, direct_radiation, diffuse_radiation, sunshine_duration, is_day"
+      },
+      "daily": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Daily variables. Options: weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, apparent_temperature_min, sunrise, sunset, daylight_duration, sunshine_duration, precipitation_sum, rain_sum, snowfall_sum, precipitation_hours, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant, shortwave_radiation_sum, et0_fao_evapotranspiration"
+      },
+      "timezone": {
+        "type": "string",
+        "description": "IANA timezone string or 'auto'. REQUIRED when using daily variables.",
+        "default": "auto"
+      },
+      "temperature_unit": {
+        "type": "string",
+        "enum": ["celsius", "fahrenheit"],
+        "default": "celsius"
+      }
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "name": "forecast",
+  "description": "Get weather forecast data from Open-Meteo API. Supports current conditions, hourly forecasts, and daily forecasts with temperature, precipitation, wind, humidity, UV, and weather codes.",
+  "endpoint": "https://api.open-meteo.com/v1/forecast",
+  "method": "GET",
+  "parameters": {
+    "type": "object",
+    "required": ["latitude", "longitude"],
+    "properties": {
+      "latitude": {
+        "type": "number",
+        "description": "WGS84 latitude (-90 to 90)"
+      },
+      "longitude": {
+        "type": "number",
+        "description": "WGS84 longitude (-180 to 180)"
+      },
+      "current": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Current weather variables. Options: temperature_2m, relative_humidity_2m, apparent_temperature, is_day, precipitation, rain, showers, snowfall, weather_code, cloud_cover, pressure_msl, surface_pressure, wind_speed_10m, wind_direction_10m, wind_gusts_10m"
+      },
+      "hourly": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Hourly weather variables. Options: temperature_2m, relative_humidity_2m, apparent_temperature, precipitation_probability, precipitation, rain, showers, snowfall, snow_depth, weather_code, cloud_cover, visibility, wind_speed_10m, wind_direction_10m, wind_gusts_10m, uv_index, is_day"
+      },
+      "daily": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Daily weather variables. Options: weather_code, temperature_2m_max, temperature_2m_min, apparent_temperature_max, apparent_temperature_min, sunrise, sunset, daylight_duration, sunshine_duration, uv_index_max, precipitation_sum, rain_sum, showers_sum, snowfall_sum, precipitation_hours, precipitation_probability_max, wind_speed_10m_max, wind_gusts_10m_max, wind_direction_10m_dominant"
+      },
+      "timezone": {
+        "type": "string",
+        "description": "IANA timezone string (e.g., 'Asia/Kolkata', 'America/New_York') or 'auto'. REQUIRED when using daily variables.",
+        "default": "auto"
+      },
+      "forecast_days": {
+        "type": "integer",
+        "description": "Number of forecast days (0-16). Default: 7",
+        "default": 7
+      },
+      "temperature_unit": {
+        "type": "string",
+        "enum": ["celsius", "fahrenheit"],
+        "description": "Temperature unit. Default: celsius",
+        "default": "celsius"
+      },
+      "windspeed_unit": {
+        "type": "string",
+        "enum": ["kmh", "ms", "mph", "kn"],
+        "description": "Wind speed unit. Default: kmh",
+        "default": "kmh"
+      },
+      "precipitation_unit": {
+        "type": "string",
+        "enum": ["mm", "inch"],
+        "description": "Precipitation unit. Default: mm",
+        "default": "mm"
+      }
+    }
+  }
+}

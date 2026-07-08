@@ -1,0 +1,15 @@
+{
+  "name": "genui-widget-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Plugin-based GenUI widget generation platform",
+  "scripts": {
+    "dev": "cd apps/web-preview && npm run dev",
+    "build": "cd apps/web-preview && npm run build",
+    "server": "cd packages/server && npx tsx src/index.ts"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "domain": "weather",
+  "name": "Weather Plugin",
+  "version": "1.0.0",
+  "description": "Weather data widgets including current conditions, forecasts, air quality, and historical weather using Open-Meteo APIs.",
+  "skills": [
+    {
+      "path": "/skill/weather/weather",
+      "name": "weather",
+      "file": "skills/weather.md",
+      "description": "Weather widget capabilities: current weather, hourly forecast, daily forecast, rain probability, humidity, wind, UV index, and weather code mapping."
+    },
+    {
+      "path": "/skill/weather/location",
+      "name": "location",
+      "file": "skills/location.md",
+      "description": "Location resolution: city geocoding, current location fallback, and timezone handling for weather queries."
+    }
+  ],
+  "tools": [
+    {
+      "path": "/tool/weather/forecast",
+      "name": "forecast",
+      "file": "tools/forecast.json",
+      "description": "Open-Meteo Forecast API: get current, hourly, and daily weather forecasts including temperature, precipitation, wind, UV, and weather codes."
+    },
+    {
+      "path": "/tool/weather/air-quality",
+      "name": "air-quality",
+      "file": "tools/air-quality.json",
+      "description": "Open-Meteo Air Quality API: get current and hourly AQI (US and European), PM2.5, PM10, ozone, NO2, and pollen data."
+    },
+    {
+      "path": "/tool/weather/historical",
+      "name": "historical",
+      "file": "tools/historical.json",
+      "description": "Open-Meteo Historical Weather API: get past weather data from 1940 to present using ERA5 reanalysis."
+    },
+    {
+      "path": "/tool/weather/geocode",
+      "name": "geocode",
+      "file": "tools/geocode.json",
+      "description": "Open-Meteo Geocoding API: search for locations by name to get coordinates, timezone, country, and population."
+    },
+    {
+      "path": "/tool/weather/current-location",
+      "name": "current-location",
+      "file": "tools/current-location.json",
+      "description": "Get the user's current location coordinates. Falls back to a configured default location."
+    }
+  ],
+  "assets": [
+    {
+      "path": "/asset/weather/icons",
+      "name": "icons",
+      "file": "assets/icons.json",
+      "description": "Weather condition icons mapped to WMO weather codes. Includes day/night variants and descriptive labels."
+    }
+  ]
+}

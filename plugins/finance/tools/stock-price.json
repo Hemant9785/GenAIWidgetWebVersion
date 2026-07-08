@@ -1,0 +1,16 @@
+{
+  "name": "stock-price",
+  "description": "Mock tool to get stock price data for ticker symbols",
+  "endpoint": "mock://stock-price",
+  "method": "GET",
+  "parameters": {
+    "type": "object",
+    "required": ["symbol"],
+    "properties": {
+      "symbol": {
+        "type": "string",
+        "description": "Stock ticker symbol, e.g. 'GOOG', 'AAPL'"
+      }
+    }
+  }
+}

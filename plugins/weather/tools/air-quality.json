@@ -1,0 +1,40 @@
+{
+  "name": "air-quality",
+  "description": "Get air quality data from Open-Meteo Air Quality API. Returns AQI indices (US and European), particulate matter, pollutant concentrations, and pollen data.",
+  "endpoint": "https://air-quality-api.open-meteo.com/v1/air-quality",
+  "method": "GET",
+  "parameters": {
+    "type": "object",
+    "required": ["latitude", "longitude"],
+    "properties": {
+      "latitude": {
+        "type": "number",
+        "description": "WGS84 latitude (-90 to 90)"
+      },
+      "longitude": {
+        "type": "number",
+        "description": "WGS84 longitude (-180 to 180)"
+      },
+      "current": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Current AQ variables. Options: european_aqi, us_aqi, pm10, pm2_5, carbon_monoxide, nitrogen_dioxide, sulphur_dioxide, ozone, uv_index, uv_index_clear_sky"
+      },
+      "hourly": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Hourly AQ variables. Options: european_aqi, european_aqi_pm2_5, european_aqi_pm10, european_aqi_nitrogen_dioxide, european_aqi_ozone, european_aqi_sulphur_dioxide, us_aqi, us_aqi_pm2_5, us_aqi_pm10, us_aqi_nitrogen_dioxide, us_aqi_ozone, us_aqi_sulphur_dioxide, us_aqi_carbon_monoxide, pm10, pm2_5, carbon_monoxide, nitrogen_dioxide, sulphur_dioxide, ozone, dust, uv_index, uv_index_clear_sky, alder_pollen, birch_pollen, grass_pollen, mugwort_pollen, olive_pollen, ragweed_pollen"
+      },
+      "timezone": {
+        "type": "string",
+        "description": "IANA timezone string or 'auto'",
+        "default": "auto"
+      },
+      "forecast_days": {
+        "type": "integer",
+        "description": "Number of forecast days (0-7). Default: 5",
+        "default": 5
+      }
+    }
+  }
+}

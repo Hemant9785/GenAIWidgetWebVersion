@@ -1,0 +1,8 @@
+{
+  "name": "finance-charts",
+  "description": "Mock charts definitions",
+  "charts": {
+    "defaultColor": "#22c55e",
+    "strokeWidth": 2
+  }
+}

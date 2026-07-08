@@ -1,0 +1,899 @@
+PROJECT GOAL
+
+Build a plugin-based GenUI widget generation platform.
+
+The system should take a user query like:
+"Create a 7 day weather widget for Bangalore with rain chance"
+
+And produce a rendered JSON-based UI widget.
+
+Weather is the first supported domain, but the architecture must be plugin-based so Finance, Calendar, News, Sports, etc. can be added later without changing the core orchestration.
+
+Core pipeline:
+
+User Query
+→ LLM-1 Capability Router
+→ Build LLM-2 tool set (default tools + domain tools)
+→ LLM-2 Variable Planner (agentic tool-calling loop)
+→ Backend Variable Resolver
+→ LLM-3 Layout Generator
+→ JSON UI Validator
+→ Web Renderer
+
+LLM Provider: OpenAI API (all LLM calls use OpenAI SDK).
+
+TWO-TIER TOOL ARCHITECTURE
+
+The system has two categories of tools:
+
+1. DEFAULT TOOLS (always present in LLM-2 prompt)
+
+These tools are always injected into LLM-2 regardless of domain.
+They let LLM-2 dynamically explore plugin content.
+
+Default tools:
+- list_skills   → lists available skills (path + description)
+- list_tools    → lists available tools (path + description)
+- list_assets   → lists available assets (path + description)
+- read_skill    → reads full skill content by path
+- read_tool     → reads full tool definition by path
+
+2. DOMAIN-SPECIFIC TOOLS (loaded after LLM-1 routing)
+
+These are the actual API-calling tools from the selected plugin.
+They are only available when LLM-1 routes to that domain.
+
+Example domain tools for weather:
+- /tool/weather/forecast
+- /tool/weather/air-quality
+- /tool/weather/historical
+- /tool/location/geocode
+- /tool/location/current-location
+
+DEFAULT TOOL DEFINITIONS
+
+list_skills:
+  Parameters: { domain?: string }
+  Returns: [{ path, description }]
+  Example: list_skills() → all skills across all plugins
+  Example: list_skills({ domain: "weather" }) → only weather skills
+
+list_tools:
+  Parameters: { domain?: string }
+  Returns: [{ path, description }]
+  Example: list_tools() → all tools across all plugins
+  Example: list_tools({ domain: "weather" }) → only weather tools
+
+list_assets:
+  Parameters: { domain?: string }
+  Returns: [{ path, description }]
+  Example: list_assets() → all assets across all plugins
+  Example: list_assets({ domain: "weather" }) → only weather assets
+
+read_skill:
+  Parameters: { path: string }
+  Returns: skill content (string or array)
+  Path semantics:
+    /skill/weather/{skillName} → returns content of a specific skill
+    /skill/weather             → returns all skills in the weather domain
+  Example: read_skill({ path: "/skill/weather/forecast" }) → single skill content
+  Example: read_skill({ path: "/skill/weather" }) → all weather skills as array:
+    [
+      { "name": "weather", "path": "/skill/weather/weather", "content": "..." },
+      { "name": "location", "path": "/skill/weather/location", "content": "..." }
+    ]
+
+read_tool:
+  Parameters: { path: string }
+  Returns: tool definition (JSON schema)
+  Path semantics:
+    /tool/weather/{toolName}  → returns definition of a specific tool
+    /tool/weather             → returns all tool definitions in the weather domain
+  Example: read_tool({ path: "/tool/weather/forecast" }) → single tool schema
+  Example: read_tool({ path: "/tool/weather" }) → all weather tool schemas as array
+
+Everything should be replaceable:
+- LLM provider
+- Router
+- Variable planner
+- Tool executor
+- Renderer
+- UI schema format
+- Domain plugins
+PHASE 1: PROJECT SETUP
+
+Create a clean TypeScript monorepo.
+
+Suggested structure:
+
+/apps
+  /web-preview
+
+/packages
+  /core
+  /registry
+  /llm
+  /plugins
+  /tools
+  /renderer
+  /schemas
+  /validator
+
+/plugins
+  /weather
+    /skills
+    /tools
+    /assets
+
+/docs
+  architecture.md
+  contracts.md
+  prompts.md
+  weather-plugin.md
+
+Requirements:
+- TypeScript
+- Zod for schemas
+- React web preview
+- JSON-based renderer
+- Open-Meteo weather integration for weather data
+- OpenAI SDK (openai npm package) for all LLM calls
+- Environment-based config:
+    OPENAI_API_KEY=sk-...
+    LLM1_MODEL=gpt-4o-mini
+    LLM2_MODEL=gpt-4o
+    LLM3_MODEL=gpt-4o
+
+Expected outcome:
+
+[ ] Project runs locally
+[ ] TypeScript configured
+[ ] Monorepo structure created
+[ ] Shared packages import correctly
+[ ] OpenAI SDK installed and configured
+PHASE 2: CORE INTERFACES
+
+Create replaceable interfaces for every major component.
+
+Implement these interfaces:
+
+interface LLMProvider {
+  chat(params: {
+    model: string;
+    messages: Message[];
+    tools?: ToolDefinition[];
+    response_format?: { type: "json_object" };
+  }): Promise<LLMResponse>
+}
+
+interface CapabilityRouter {
+  route(input: RouterInput): Promise<RouterOutput>
+}
+
+interface VariablePlanner {
+  plan(input: VariablePlannerInput): Promise<VariablePlannerOutput>
+}
+
+interface DefaultToolHandler {
+  listSkills(domain?: string): Promise<SkillSummary[]>
+  listTools(domain?: string): Promise<ToolSummary[]>
+  listAssets(domain?: string): Promise<AssetSummary[]>
+  readSkill(path: string): Promise<SkillContent | SkillContent[]>
+  readTool(path: string): Promise<ToolDefinition | ToolDefinition[]>
+}
+
+interface DomainToolExecutor {
+  execute(toolPath: string, params: any): Promise<any>
+}
+
+interface VariableResolver {
+  resolve(plan: VariablePlan): Promise<ResolvedVariables>
+}
+
+interface LayoutGenerator {
+  generate(input: LayoutInput): Promise<LayoutOutput>
+}
+
+interface UIValidator {
+  validate(uiJson: any): ValidationResult
+}
+
+interface Renderer {
+  render(uiJson: any): ReactNode
+}
+
+Goal:
+No component should depend directly on OpenAI, Open-Meteo, React, or any specific renderer.
+The LLMProvider interface abstracts the OpenAI SDK behind a replaceable contract.
+
+Expected outcome:
+
+[ ] All core interfaces exist
+[ ] LLMProvider interface wraps OpenAI
+[ ] DefaultToolHandler interface exists
+[ ] DomainToolExecutor interface exists
+[ ] Mock implementations exist
+[ ] Core pipeline can run with mocks
+PHASE 3: PLUGIN REGISTRY
+
+Create a registry system that discovers available plugins.
+
+The registry serves two purposes:
+1. Provides compact summaries to LLM-1 (path + description only)
+2. Acts as the backend for DEFAULT TOOLS used by LLM-2
+
+Each plugin should expose:
+
+manifest.json
+
+Example:
+
+{
+  "domain": "weather",
+  "skills": [
+    {
+      "path": "/skill/weather",
+      "description": "Weather widgets: current weather, forecast, rain, humidity, wind, AQI, UV."
+    }
+  ],
+  "tools": [
+    {
+      "path": "/tool/weather",
+      "description": "Open-Meteo weather forecast, hourly, daily, AQI and historical APIs."
+    }
+  ],
+  "assets": [
+    {
+      "path": "/asset/weather",
+      "description": "Weather icons, rain icons, temperature icons and condition icons."
+    }
+  ]
+}
+
+Registry must implement DefaultToolHandler interface:
+
+Path resolution logic:
+
+  /skill/weather           → return all skills in weather domain
+  /skill/weather/forecast  → return single "forecast" skill
+  /tool/weather            → return all tools in weather domain
+  /tool/weather/forecast   → return single "forecast" tool
+  /asset/weather           → return all assets in weather domain
+  /asset/weather/icons     → return single "icons" asset
+
+Path format: /{type}/{domain}/{name?}
+  type   = skill | tool | asset
+  domain = weather | finance | etc.
+  name   = optional specific resource name
+
+Important:
+The LLM should never see full plugin files in LLM-1.
+LLM-1 only sees path + description.
+LLM-2 can dynamically load full content via default tools.
+
+Expected outcome:
+
+[ ] Registry loads plugin manifests
+[ ] Registry returns compact path descriptions for LLM-1
+[ ] Registry implements DefaultToolHandler for LLM-2
+[ ] Path resolution works: /skill/weather returns all, /skill/weather/forecast returns one
+[ ] Registry can load full selected skill/tool/asset files
+PHASE 4: WEATHER PLUGIN
+
+Create the first plugin: weather.
+
+Files:
+
+/plugins/weather/manifest.json
+
+/plugins/weather/skills/weather.md
+/plugins/weather/skills/location.md
+
+/plugins/weather/tools/forecast.json
+/plugins/weather/tools/air-quality.json
+/plugins/weather/tools/historical.json
+/plugins/weather/tools/geocode.json
+/plugins/weather/tools/current-location.json
+
+/plugins/weather/assets/manifest.json
+
+Path mapping (filesystem → registry path):
+
+/plugins/weather/skills/weather.md       → /skill/weather/weather
+/plugins/weather/skills/location.md      → /skill/weather/location
+/plugins/weather/tools/forecast.json     → /tool/weather/forecast
+/plugins/weather/tools/air-quality.json  → /tool/weather/air-quality
+/plugins/weather/tools/historical.json   → /tool/weather/historical
+/plugins/weather/tools/geocode.json      → /tool/weather/geocode
+/plugins/weather/tools/current-location.json → /tool/weather/current-location
+
+Weather skill should describe:
+- current weather
+- hourly forecast
+- daily forecast
+- rain probability
+- AQI
+- humidity
+- wind
+- UV
+- historical weather
+- Open-Meteo weather_code mapping
+
+Location skill should describe:
+- city geocoding
+- current location fallback
+- timezone handling
+
+Expected outcome:
+
+[ ] Weather plugin loads
+[ ] Weather skill readable via read_skill({ path: "/skill/weather/weather" })
+[ ] All weather skills readable via read_skill({ path: "/skill/weather" })
+[ ] Weather tools readable via read_tool({ path: "/tool/weather/forecast" })
+[ ] Weather assets readable
+PHASE 5: LLM-1 CAPABILITY ROUTER
+
+Implement LLM-1 using OpenAI API.
+
+LLM-1 is a single-shot JSON call. No tools. No agentic loop.
+Use gpt-4o-mini (configurable via LLM1_MODEL env var).
+
+Input:
+{
+  user_query,
+  skills: [{ path, description }],
+  tools: [{ path, description }],
+  assets: [{ path, description }]
+}
+
+Output:
+{
+  "selected_paths": {
+    "skills": [],
+    "tools": [],
+    "assets": []
+  },
+  "domain": "",
+  "sub_intent": "",
+  "confidence": 0.0,
+  "clarification_required": false,
+  "reason": ""
+}
+
+OpenAI call:
+  model: LLM1_MODEL (default: gpt-4o-mini)
+  response_format: { type: "json_object" }
+  No tools parameter (LLM-1 does not call tools)
+
+Rules:
+- Output only JSON
+- Select only existing paths
+- Do not generate variables
+- Do not generate UI
+- Do not call tools
+- Use minimum required paths
+
+Expected outcome:
+
+[ ] Weather queries route to weather paths
+[ ] Location queries include location paths
+[ ] Unknown queries request clarification
+[ ] Invalid JSON retries once
+[ ] Uses OpenAI API with gpt-4o-mini
+PHASE 6: LLM-2 VARIABLE PLANNER
+
+Implement LLM-2 as an AGENTIC TOOL-CALLING LOOP using OpenAI API.
+
+LLM-2 is NOT a single-shot call. It runs in a loop with tool calls.
+Use gpt-4o (configurable via LLM2_MODEL env var).
+
+Tool set injected into LLM-2 prompt:
+
+1. DEFAULT TOOLS (always present, every request):
+   - list_skills({ domain?: string })
+   - list_tools({ domain?: string })
+   - list_assets({ domain?: string })
+   - read_skill({ path: string })
+   - read_tool({ path: string })
+
+2. DOMAIN-SPECIFIC TOOLS (from LLM-1 selected paths):
+   - Only the tools selected by LLM-1 routing
+   - Example: /tool/weather/forecast, /tool/location/geocode
+
+OpenAI call:
+  model: LLM2_MODEL (default: gpt-4o)
+  tools: [...defaultToolDefinitions, ...domainToolDefinitions]
+
+Agentic loop:
+
+  messages = [system_prompt, user_message]
+  while true:
+    response = openai.chat.completions.create(messages, tools)
+    if response has tool_calls:
+      for each tool_call:
+        if tool_call is default tool:
+          result = defaultToolHandler.execute(tool_call)
+        else if tool_call is domain tool:
+          result = domainToolExecutor.execute(tool_call)
+        append tool_call and result to messages
+      continue loop
+    else:
+      parse response as final variable plan
+      break
+
+Input context (in system prompt):
+- user query
+- domain from LLM-1
+- global variables (if any)
+
+LLM-2 decides on its own what to read:
+- It may call read_skill("/skill/weather") to understand capabilities
+- It may call read_tool("/tool/weather/forecast") to understand parameters
+- It may call /tool/location/geocode to resolve ambiguous locations
+- It outputs the final variable plan when done
+
+Final output (last message, no tool calls):
+
+{
+  "status": "finish",
+  "clarification_required": false,
+  "variables": [
+    {
+      "variable_name": "dailyForecast",
+      "variable_type": "array",
+      "semantic_type": "daily_weather_forecast",
+      "source": {
+        "type": "tool",
+        "tool_path": "/tool/weather/forecast",
+        "parameters": {
+          "latitude": "{{location.latitude}}",
+          "longitude": "{{location.longitude}}",
+          "forecast_days": 7,
+          "daily": [
+            "weather_code",
+            "temperature_2m_max",
+            "temperature_2m_min",
+            "precipitation_probability_max"
+          ]
+        }
+      },
+      "importance": "required"
+    }
+  ],
+  "assets": []
+}
+
+Safety:
+- Max loop iterations: 10
+- Max total tool calls: 20
+- Timeout per loop iteration: 30 seconds
+
+Important:
+Default tools let LLM-2 explore. Domain tools let LLM-2 resolve ambiguity.
+Prefer finish with tool-backed variable sources over calling domain tools directly.
+Do not call domain tools just to fetch normal data that the resolver can handle.
+
+Expected outcome:
+
+[ ] LLM-2 can call default tools to explore skills/tools
+[ ] LLM-2 can call domain tools for disambiguation
+[ ] Agentic loop runs until finish
+[ ] Produces variable plans
+[ ] Avoids unnecessary tool calls
+[ ] Validates tool paths
+[ ] Loop terminates within safety limits
+PHASE 7: TOOL EXECUTOR
+
+Implement tool execution for both tool categories.
+
+Default Tool Executor:
+  Dispatches default tool calls to the registry (DefaultToolHandler).
+
+  list_skills  → registry.listSkills(domain)
+  list_tools   → registry.listTools(domain)
+  list_assets  → registry.listAssets(domain)
+  read_skill   → registry.readSkill(path)
+  read_tool    → registry.readTool(path)
+
+Domain Tool Executor:
+  Dispatches domain tool calls to actual API integrations.
+
+  /tool/location/geocode
+  - Uses Open-Meteo Geocoding API
+  - Input: name, count, language
+  - Output: latitude, longitude, timezone, country, name
+
+  /tool/weather/forecast
+  - Uses Open-Meteo Forecast API
+  - Supports current, hourly, daily
+  - Supports forecast_days
+  - Supports weather_code, temperature, rain, wind, humidity, UV
+
+  /tool/weather/air-quality
+  - Uses Open-Meteo Air Quality API
+
+  /tool/weather/historical
+  - Uses Open-Meteo Historical API
+
+  /tool/location/current-location
+  - For now mock with configured default location
+  - Later replace with device location
+
+Tool dispatch logic:
+  if tool_name in [list_skills, list_tools, list_assets, read_skill, read_tool]:
+    → route to DefaultToolHandler (registry)
+  else:
+    → route to DomainToolExecutor (API calls)
+
+Expected outcome:
+
+[ ] Default tools dispatch to registry
+[ ] Geocode works via Open-Meteo
+[ ] Forecast works via Open-Meteo
+[ ] AQI works via Open-Meteo
+[ ] Tool executor dispatches by tool category
+[ ] Tool errors are structured
+PHASE 8: VARIABLE RESOLVER
+
+Implement deterministic variable resolution.
+
+Input:
+Variable plan from LLM-2.
+
+LLM-2 may have already called some domain tools during planning
+(e.g., geocode for location disambiguation). The resolver must handle:
+1. Variables already resolved by LLM-2 during its agentic loop
+2. Variables that still need resolution (tool-backed sources in the plan)
+
+Responsibilities:
+- Resolve dependency order
+- Execute domain tools for unresolved variables
+- Replace references like {{location.latitude}}
+- Store resolved variables
+- Return clean variable map to LLM-3
+
+Example output:
+
+{
+  "locationName": "Bangalore",
+  "dailyForecast": {
+    "time": [],
+    "temperature_2m_max": [],
+    "temperature_2m_min": [],
+    "precipitation_probability_max": [],
+    "weather_code": []
+  }
+}
+
+Expected outcome:
+
+[ ] Resolves tool-backed variables
+[ ] Handles already-resolved variables from LLM-2 loop
+[ ] Handles dependencies
+[ ] Handles failed tools
+[ ] Produces final variable object
+PHASE 9: UI SPEC + COMPONENT CATALOG
+
+Define your canonical UI JSON spec.
+
+Do not tightly couple to any renderer.
+
+Components:
+
+Card
+Column
+Row
+Text
+Image
+List
+Badge
+Metric
+ProgressBar
+MiniChart
+WeatherIcon
+Spacer
+
+Each component should define:
+- name
+- props
+- children support
+- examples
+- constraints
+
+Example:
+
+{
+  "type": "Card",
+  "props": {
+    "padding": 16,
+    "radius": 20
+  },
+  "children": []
+}
+
+Expected outcome:
+
+[ ] Component catalog exists
+[ ] Component prop schema exists
+[ ] Example UI specs exist
+PHASE 10: LLM-3 LAYOUT GENERATOR
+
+Implement LLM-3 using OpenAI API.
+
+LLM-3 is a single-shot JSON call. No tools. No agentic loop.
+Use gpt-4o (configurable via LLM3_MODEL env var).
+
+Input:
+- user query
+- resolved variables
+- selected assets
+- component catalog
+- widget constraints
+- UI spec examples
+
+Output:
+Only valid UI JSON.
+
+OpenAI call:
+  model: LLM3_MODEL (default: gpt-4o)
+  response_format: { type: "json_object" }
+  No tools parameter (LLM-3 does not call tools)
+
+Rules:
+- Use only provided components
+- Use only provided variables
+- Use only provided assets
+- No unsupported props
+- No markdown
+- No explanation
+- No Android code
+- No React code
+
+Goal:
+Test actual GenUI capability.
+No deterministic templates.
+
+Expected outcome:
+
+[ ] Generates UI JSON
+[ ] Uses variables correctly
+[ ] Uses assets correctly
+[ ] Respects component catalog
+[ ] Uses OpenAI API with gpt-4o
+PHASE 11: UI VALIDATOR
+
+Create strict validator.
+
+Checks:
+- Valid JSON
+- Valid component type
+- Valid props
+- Valid children
+- Valid variable references
+- Valid asset references
+- No unknown fields
+- Widget size constraints
+
+If validation fails:
+- Return precise error
+- Retry LLM-3 with repair prompt
+- Max retries: 2
+
+Expected outcome:
+
+[ ] Invalid UI is rejected
+[ ] Repair loop works
+[ ] Final UI is always valid or returns graceful failure
+PHASE 12: WEB PREVIEW RENDERER
+
+Create React renderer for the canonical UI spec.
+
+Do not make renderer domain-specific.
+
+Render:
+- Card
+- Row
+- Column
+- Text
+- Image
+- List
+- Badge
+- Metric
+- ProgressBar
+- WeatherIcon
+
+Optional:
+Use Vercel json-render ideas or adapter pattern, but keep your own canonical spec.
+
+Architecture:
+
+Canonical UI JSON
+→ React Renderer Adapter
+→ Web Preview
+
+Later:
+Canonical UI JSON
+→ Android Renderer Adapter
+→ Android Widget
+
+Expected outcome:
+
+[ ] Web preview renders generated widget
+[ ] Renderer is replaceable
+[ ] No weather-specific logic inside renderer
+PHASE 13: ORCHESTRATOR
+
+Implement complete pipeline:
+
+generateWidget(userQuery)
+
+Steps:
+1. Load registry
+2. LLM-1 route (OpenAI, single-shot, gpt-4o-mini)
+3. Build LLM-2 tool set:
+   a. Always include default tools: list_skills, list_tools, list_assets, read_skill, read_tool
+   b. Load domain-specific tools from LLM-1 selected paths
+4. LLM-2 agentic loop (OpenAI, tool-calling, gpt-4o)
+5. Resolve remaining variables
+6. LLM-3 layout (OpenAI, single-shot, gpt-4o)
+7. Validate layout
+8. Render preview
+9. Return debug trace
+
+Debug trace should include:
+- router output
+- selected files
+- LLM-2 tool call chain (each default + domain tool call with result)
+- variable plan
+- tool calls during resolution
+- resolved variables
+- layout output
+- validation result
+
+Expected outcome:
+
+[ ] End-to-end flow works
+[ ] Debug trace available
+[ ] LLM-2 tool call chain is traceable
+[ ] User can test weather queries
+PHASE 14: WEB APP UI
+
+Create simple web UI.
+
+Features:
+- Input box for query
+- Generate button
+- Rendered widget preview
+- Debug tabs:
+  - Router output
+  - LLM-2 tool call chain (shows each default/domain tool call and result)
+  - Variable plan
+  - Tool results (from variable resolution)
+  - Resolved variables
+  - Layout JSON
+  - Validation output
+
+This is for development/testing, not production UX.
+
+Expected outcome:
+
+[ ] Query can be entered
+[ ] Widget preview visible
+[ ] Debug information visible
+[ ] LLM-2 agentic loop steps visible
+PHASE 15: TEST DATASET
+
+Create dataset:
+
+/eval/weather_queries.json
+
+Include 100 weather queries first.
+
+Categories:
+- current weather
+- weather near me
+- weather in city
+- tomorrow
+- tonight
+- hourly
+- 7 day forecast
+- rain probability
+- AQI
+- wind
+- humidity
+- UV
+- historical weather
+- ambiguous locations
+
+Each test case:
+{
+  "query": "",
+  "expected_paths": {},
+  "expected_variables": [],
+  "expected_tools": []
+}
+
+Expected outcome:
+
+[ ] Evaluation runner exists
+[ ] Router accuracy measured
+[ ] Variable planner accuracy measured
+[ ] Render success measured
+PHASE 16: OBSERVABILITY
+
+Log every run.
+
+Store:
+- input query
+- router output
+- selected paths
+- LLM-2 tool call chain (each tool call name, params, result, latency)
+- LLM latency (per LLM stage: LLM-1, LLM-2 total, LLM-3)
+- tool latency (per tool call)
+- validation errors
+- render success
+- final JSON
+- total token usage (per LLM stage)
+
+Add run_id to every request.
+
+Expected outcome:
+
+[ ] Every generation can be debugged
+[ ] Failures are traceable
+[ ] LLM-2 agentic loop steps are logged
+[ ] Token usage tracked per stage
+PHASE 17: REPLACEABILITY CHECK
+
+Prove plugin architecture.
+
+Create mock finance plugin with:
+- /skill/finance
+- /tool/finance
+- /asset/finance
+
+Do not implement real finance tools yet.
+
+Goal:
+LLM-1 should route finance queries to finance paths without modifying core pipeline.
+LLM-2 should be able to call read_skill("/skill/finance") to explore finance skills.
+Default tools work identically for any domain.
+
+Expected outcome:
+
+[ ] Finance plugin discovered
+[ ] Router selects finance paths
+[ ] LLM-2 default tools work with finance domain
+[ ] Core pipeline unchanged
+FINAL MVP ACCEPTANCE CRITERIA
+
+The system should handle:
+
+1. "Create a weather widget for Bangalore"
+2. "Show 7 day forecast for Delhi"
+3. "Will it rain tomorrow in Mumbai?"
+4. "Show AQI and temperature for Bangalore"
+5. "Weather outside"
+6. "Hourly weather tonight in Hyderabad"
+
+For each:
+[ ] Correct paths selected by LLM-1
+[ ] LLM-2 explores skills/tools via default tools
+[ ] LLM-2 produces correct variable plan
+[ ] Correct Open-Meteo tools used
+[ ] Variables resolved
+[ ] UI JSON generated by LLM-3
+[ ] UI JSON validated
+[ ] Widget rendered in web preview
+[ ] Debug trace available with full LLM-2 tool chain
+
+Use this implementation strategy:
+
+Build mock pipeline first.
+Then replace each mock one by one:
+
+Mock Registry → Real Registry (with DefaultToolHandler)
+Mock LLM → OpenAI LLM (with agentic loop for LLM-2)
+Mock Tools → Open-Meteo Tools
+Mock Renderer → React Renderer
+Mock Validator → Strict Validator
