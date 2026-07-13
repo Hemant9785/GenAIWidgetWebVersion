@@ -12,8 +12,14 @@ object GenWidgetSpecParser {
         } catch (e: JSONException) {
             throw Exception("JSONSpec is not valid JSON.", e)
         }
+        if (root.optString("kind") != "genWidget") {
+            throw Exception("JSONSpec kind must be 'genWidget'.")
+        }
+        if (root.optString("schemaVersion") != "0.1") {
+            throw Exception("JSONSpec schemaVersion must be '0.1'.")
+        }
         val spec = GenWidgetSpec(root)
-        return GenWidgetDocumentMapper.fromSpec(spec)
+        return GenWidgetDocumentMapper.fromSpec(spec).also(WidgetSpecValidator::validate)
     }
 }
 
@@ -95,6 +101,12 @@ object GenWidgetDocumentMapper {
         for (i in 0 until rawComponents.length()) {
             val raw = rawComponents.optJSONObject(i) ?: continue
             val id = raw.optString("id")
+            if (id.isBlank()) {
+                throw Exception("Component at index $i is missing an id.")
+            }
+            if (components.containsKey(id)) {
+                throw Exception("Duplicate component id '$id'.")
+            }
             components[id] = ComponentNode(
                 id = id,
                 component = raw.optString("component"),

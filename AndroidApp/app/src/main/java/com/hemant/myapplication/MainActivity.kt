@@ -120,7 +120,11 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
                 Button(
                     onClick = {
                         if (apiKey.isBlank()) {
-                            Toast.makeText(context, "Please enter your OpenAI API key first", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                context,
+                                "OpenAI API key is missing from local.properties",
+                                Toast.LENGTH_SHORT,
+                            ).show()
                             return@Button
                         }
                         if (prompt.isBlank()) {

@@ -36,11 +36,11 @@ class Orchestrator(private val apiKey: String) {
             // 4. Variable Resolver (delegates to the active DomainAdapter tool execution, with 3-pass self-correction)
             Log.d(TAG, "Phase 4: Resolving tool-backed variables...")
             val resolver = VariableResolver(adapter)
-            var resolvedValues = JSONObject()
+            var resolvedData: ResolvedWidgetData? = null
             
             for (attempt in 0 until 3) {
                 try {
-                    resolvedValues = resolver.resolve(variablePlan)
+                    resolvedData = resolver.resolve(variablePlan)
                     break
                 } catch (e: Exception) {
                     val errorMsg = e.localizedMessage ?: "Unknown error"
@@ -53,12 +53,20 @@ class Orchestrator(private val apiKey: String) {
                     }
                 }
             }
+            val finalResolvedData = resolvedData
+                ?: throw Exception("Variable resolver completed without runtime values")
+            val resolvedValues = finalResolvedData.runtimeValues
             Log.d(TAG, "Resolved values: $resolvedValues")
 
             // 5. LLM-3 Layout Generator (produces dynamic A2UI layoutspec)
             Log.d(TAG, "Phase 5: Running Layout Generator (LLM-3)")
             val generator = Llm3LayoutGenerator(apiKey)
-            val document = generator.generateLayout(userQuery, resolvedValues, routerOutput.domain)
+            val document = generator.generateLayout(
+                userQuery = userQuery,
+                resolvedVariables = resolvedValues,
+                variableDefinitions = finalResolvedData.variableDefinitions,
+                domain = routerOutput.domain,
+            )
             Log.d(TAG, "LLM-3 Layout generated: ID='${document.id}', Title='${document.title}'")
 
             val snapshot = RuntimeSnapshot("ready", "4x3", resolvedValues)

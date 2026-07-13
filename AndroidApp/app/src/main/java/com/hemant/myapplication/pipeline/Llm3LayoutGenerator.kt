@@ -1,6 +1,9 @@
 package com.hemant.myapplication.pipeline
 
 import com.hemant.myapplication.model.GenWidgetSpecParser
+import com.hemant.myapplication.model.BindingExpr
+import com.hemant.myapplication.model.ComponentValue
+import com.hemant.myapplication.model.WidgetComponentCatalog
 import com.hemant.myapplication.model.WidgetDocument
 import com.hemant.myapplication.util.HttpUtil
 import org.json.JSONArray
@@ -8,7 +11,15 @@ import org.json.JSONObject
 
 class Llm3LayoutGenerator(private val apiKey: String) {
     @Throws(Exception::class)
-    fun generateLayout(userQuery: String, resolvedVariables: JSONObject, domain: String): WidgetDocument {
+    fun generateLayout(
+        userQuery: String,
+        resolvedVariables: JSONObject,
+        variableDefinitions: List<VariableDefinition>,
+        domain: String,
+    ): WidgetDocument {
+        val variableMetadata = JSONArray().also { output ->
+            variableDefinitions.forEach { definition -> output.put(definition.toJson()) }
+        }.toString(2)
         val systemPrompt = """
             You are the Layout Generator (LLM-3) for a dynamic Android widget platform.
             Your task is to design a beautiful, modern Android widget layout tree represented as a GenWidget-A2UI JSONSpec document.
@@ -40,18 +51,10 @@ class Llm3LayoutGenerator(private val apiKey: String) {
               }
               
             Component Rules:
-            - Every component must have a unique "id" (string), "component" (string, e.g. Column, Row, Text, Icon, Spacer, Divider, Image, InsightList), "fields" (object of properties), and "children" (array of child component IDs).
+            - Every component must have a unique "id" (string), "component" (string), "fields" (object of properties), and "children" (array of child component IDs).
             - Do not nest components. Write a flat array of components. A component links to its children by their IDs.
-            - Allowed components:
-              * Column: fields: "gap" ("xs", "sm", "md", "lg"), "padding" ("xs", "sm", "lg", "md"), "background" ("surface", "transparent"), "cornerRadius" ("sm", "md", "lg")
-              * Row: fields: "gap", "align" ("center", "end", "spaceBetween")
-              * Text: fields: "text" (BindingExpr), "style" ("titleLarge", "titleMedium", "bodySmall", "labelSmall", "displaySmall"), "color" ("primary", "secondary", "muted", "warning")
-              * Icon: fields: "icon" (IconRequest), "size" ("xs", "sm", "md", "lg", "xl"), "color" ("primary", "secondary", "muted", "warning")
-              * IconButton: fields: "icon" (IconRequest), "background" ("transparent", "default")
-              * Image: fields: "source" (BindingExpr)
-              * Spacer: fields: "size" ("xs", "sm", "md", "lg", "xl")
-              * Divider
-              * InsightList: fields: "source" (BindingExpr.Path), "presentation" ("chips", "list"), "layout" ("horizontal", "vertical"), "maxItems" (number), "columns" (number)
+            - You may use ONLY this renderer-supported catalog:
+            ${WidgetComponentCatalog.promptCatalog()}
               
             BindingExpr Options:
             - Binding to path: { "path": "/model/..." }
@@ -64,8 +67,15 @@ class Llm3LayoutGenerator(private val apiKey: String) {
             - Set "source" field to the array path (e.g. { "path": "/model/weather/hourlyItemsToday" }).
             - Set "presentation" to "chips" to display it as a horizontal grid of chip items, or set "layout" to "horizontal".
             
-            Live Variables Snapshot available at runtime:
+            Runtime values available for visible bindings:
             $resolvedVariables
+
+            INTERNAL VARIABLE DEFINITIONS FOR LAYOUT REASONING ONLY:
+            $variableMetadata
+
+            Use the internal descriptions and presentation hints to choose visual hierarchy and component type. They are not user-facing data.
+            NEVER display a variable description or presentation hint as text, a literal string, an action label, or preview data. Bind visible content only to paths that exist in the runtime values above, such as `/model/<variable_name>/...`.
+            Do not invent paths, components, or fields outside the supplied catalog.
             
             Few-Shot Flat JSON Examples:
             
@@ -157,7 +167,7 @@ class Llm3LayoutGenerator(private val apiKey: String) {
                       {
                         "id": "title_text",
                         "component": "Text",
-                        "fields": { "text": { "path": "/model/genericInfo/title" }, "style": "titleLarge", "color": "primary" },
+                        "fields": { "text": { "path": "/model/summary/title" }, "style": "titleLarge", "color": "primary" },
                         "children": []
                       },
                       {
@@ -169,7 +179,7 @@ class Llm3LayoutGenerator(private val apiKey: String) {
                       {
                         "id": "content_text",
                         "component": "Text",
-                        "fields": { "text": { "path": "/model/genericInfo/content" }, "style": "bodySmall", "color": "secondary" },
+                        "fields": { "text": { "path": "/model/summary/content" }, "style": "bodySmall", "color": "secondary" },
                         "children": []
                       }
                     ]
@@ -218,7 +228,57 @@ class Llm3LayoutGenerator(private val apiKey: String) {
         
         android.util.Log.d("HEMANT_DBG", "Raw LLM-3 Layout Spec JSON:\n${content.trim()}")
         
-        val doc = GenWidgetSpecParser.parse(content.trim())
-        return doc
+        return GenWidgetSpecParser.parse(content.trim()).also { document ->
+            ensurePlanningMetadataIsHidden(document, variableDefinitions)
+        }
     }
+
+    private fun ensurePlanningMetadataIsHidden(
+        document: WidgetDocument,
+        variableDefinitions: List<VariableDefinition>,
+    ) {
+        val internalDescriptions = variableDefinitions
+            .map { normalize(it.description) }
+            .filter { it.length >= 24 }
+            .distinct()
+        if (internalDescriptions.isEmpty()) return
+
+        fun includesInternalDescription(text: String): Boolean {
+            val normalizedText = normalize(text)
+            return internalDescriptions.any { description -> normalizedText.contains(description) }
+        }
+
+        fun inspect(value: ComponentValue) {
+            when (value) {
+                is ComponentValue.Text -> require(!includesInternalDescription(value.value)) {
+                    "Layout attempted to display internal variable metadata"
+                }
+                is ComponentValue.Binding -> {
+                    val expr = value.expr
+                    if (expr is BindingExpr.LiteralString) {
+                        require(!includesInternalDescription(expr.value)) {
+                            "Layout attempted to display internal variable metadata"
+                        }
+                    }
+                }
+                is ComponentValue.ListValue -> value.values.forEach(::inspect)
+                is ComponentValue.ObjectValue -> value.values.values.forEach(::inspect)
+                else -> Unit
+            }
+        }
+
+        document.surfaces.values.forEach { surface ->
+            surface.components.values.forEach { component ->
+                component.fields.values.forEach(::inspect)
+            }
+        }
+        document.previewMockData?.let { preview ->
+            require(!includesInternalDescription(preview.toString())) {
+                "Layout preview data contains internal variable metadata"
+            }
+        }
+    }
+
+    private fun normalize(value: String): String =
+        value.lowercase().replace(Regex("\\s+"), " ").trim()
 }

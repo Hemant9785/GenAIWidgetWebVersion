@@ -10,10 +10,12 @@ class GenericDomainAdapter : DomainAdapter {
     override fun getSystemPromptGuidance(): String {
         return """
             GENERIC WIDGET SPECIFICS:
-            - The widget must fulfill the user's request using static values or general bindings.
-            - You can bind to "/model/generic/title", "/model/generic/content", "/model/generic/subtitle", or write literals directly using { "literalString": "..." }.
-            - Create a beautiful layout using Columns, Rows, Texts, Dividers, and Icons that is visual and informative.
-            - Populate the 'preview.mockData' with details matching the user's custom prompt.
+            - Fulfill the request with one or more STATIC variables generated from general knowledge. Do not use tools.
+            - Every static variable MUST include a non-empty `description`. The description is internal metadata for the layout generator: explain the meaning of the data, its hierarchy, and the most useful visual representation.
+            - Add `presentation_hints` when useful, such as "summary", "comparison", "ranked_list", "timeline", "checklist", "metrics", or "cards".
+            - Put only user-facing values inside `source.value`. Never put the internal description or presentation hints in `source.value`.
+            - Use structured arrays of objects for lists, comparisons, steps, timelines, recommendations, and tables so the renderer can bind an InsightList.
+            - Do not claim static knowledge is live or current. Queries that need current prices, weather, news, scores, availability, or other time-sensitive facts must be handled by a live-data domain/tool instead.
         """.trimIndent()
     }
 

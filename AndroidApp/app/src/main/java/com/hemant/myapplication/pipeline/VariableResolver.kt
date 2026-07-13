@@ -3,12 +3,17 @@ package com.hemant.myapplication.pipeline
 import com.hemant.myapplication.domain.DomainAdapter
 import org.json.JSONObject
 
+data class ResolvedWidgetData(
+    val runtimeValues: JSONObject,
+    val variableDefinitions: List<VariableDefinition>,
+)
+
 class VariableResolver(private val adapter: DomainAdapter) {
     private val resolvedMap = HashMap<String, Any>()
     private val resolvingSet = HashSet<String>()
 
     @Throws(Exception::class)
-    suspend fun resolve(plan: VariablePlan): JSONObject {
+    suspend fun resolve(plan: VariablePlan): ResolvedWidgetData {
         val variablesMap = HashMap<String, JSONObject>()
         for (i in 0 until plan.variables.length()) {
             val variable = plan.variables.getJSONObject(i)
@@ -29,7 +34,10 @@ class VariableResolver(private val adapter: DomainAdapter) {
         val model = JSONObject()
         for (name in variablesMap.keys) {
             val value = resolvedMap[name]
-            if (value is JSONObject) {
+            val sourceType = variablesMap.getValue(name)
+                .getJSONObject("source")
+                .optString("type")
+            if (sourceType == "tool" && value is JSONObject) {
                 val innerModel = value.optJSONObject("model")
                 if (innerModel != null) {
                     // Merge internal model mappings (like weather forecast payloads) directly into root
@@ -41,12 +49,17 @@ class VariableResolver(private val adapter: DomainAdapter) {
                 } else {
                     model.put(name, value)
                 }
-            } else {
-                model.put(name, value)
             }
+            // Static values always retain their declared variable name, so a
+            // planner value such as `summary` is reliably bound at
+            // /model/summary/... regardless of its internal object keys.
+            else model.put(name, value)
         }
 
-        return JSONObject().put("model", model)
+        return ResolvedWidgetData(
+            runtimeValues = JSONObject().put("model", model),
+            variableDefinitions = plan.definitions,
+        )
     }
 
     @Throws(Exception::class)
@@ -63,10 +76,10 @@ class VariableResolver(private val adapter: DomainAdapter) {
         val type = source.optString("type")
 
         if (type == "static") {
-            val value = source.opt("value")
-            if (value != null) {
-                resolvedMap[name] = value
+            if (!source.has("value") || source.isNull("value")) {
+                throw Exception("Static variable '$name' is missing a value")
             }
+            resolvedMap[name] = source.opt("value")
         } else if (type == "tool") {
             val toolPath = source.getString("tool_path")
             val rawParams = source.optJSONObject("parameters") ?: JSONObject()
@@ -80,6 +93,8 @@ class VariableResolver(private val adapter: DomainAdapter) {
                 throw Exception("Tool '$toolPath' execution failed: ${result.getString("error")}")
             }
             resolvedMap[name] = result
+        } else {
+            throw Exception("Variable '$name' has unsupported source type '$type'")
         }
 
         resolvingSet.remove(name)
