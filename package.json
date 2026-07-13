@@ -5,8 +5,11 @@
   "description": "Plugin-based GenUI widget generation platform",
   "scripts": {
     "dev": "cd apps/web-preview && npm run dev",
-    "build": "cd apps/web-preview && npm run build",
-    "server": "cd packages/server && npx tsx src/index.ts"
+    "build:web": "cd apps/web-preview && npm run build",
+    "build:server": "npm --prefix packages/server run build",
+    "build": "npm run build:web && npm run build:server",
+    "server": "cd packages/server && npx tsx src/index.ts",
+    "start": "node packages/server/dist/index.js"
   },
   "workspaces": [
     "packages/*",

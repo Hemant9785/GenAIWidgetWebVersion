@@ -16,7 +16,6 @@ export const Image: React.FC<ImageProps> = ({
   radius = 0,
 }) => {
   const style: React.CSSProperties = {
-    src,
     width: typeof width === 'number' ? `${width}px` : width,
     height: typeof height === 'number' ? `${height}px` : height,
     objectFit: fit,

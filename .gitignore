@@ -8,6 +8,9 @@ packages/server/.env
 node_modules/
 **/node_modules/
 
+# Android app (excluded from deployment repository)
+/AndroidApp/
+
 # Build outputs and logs
 dist/
 build/
