@@ -1,0 +1,44 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+packages/server/.env
+
+# Dependency directories
+node_modules/
+**/node_modules/
+
+# Android app (excluded from deployment repository)
+
+# Android/Gradle generated files
+**/.gradle/
+**/.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+**/local.properties
+
+# Android Studio user-specific files
+**/.idea/
+*.iml
+
+# Android build packages
+*.apk
+*.aab
+
+# Native/debug artifacts
+*.hprof
+captures/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
+
+# Build outputs and logs
+dist/
+build/
+logs.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

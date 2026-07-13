@@ -119,6 +119,10 @@ export class StrictUIValidator implements UIValidator {
       }
     }
   }
+  private isPlaceholder(val: any): boolean {
+    if (typeof val !== 'string') return false;
+    return val.includes('{{') || val.includes('$item') || val.includes('$index');
+  }
 
   private validatePropsForType(
     type: string,
@@ -127,8 +131,31 @@ export class StrictUIValidator implements UIValidator {
     errors: ValidationError[]
   ): void {
     const checkType = (key: string, expected: string) => {
-      const val = props[key];
-      if (val === undefined) return;
+      let val = props[key];
+      if (val === undefined || val === null) return;
+      if (this.isPlaceholder(val)) return;
+
+      // Coerce numeric strings
+      if (expected === 'number' && typeof val === 'string') {
+        const num = Number(val);
+        if (!isNaN(num)) {
+          props[key] = num;
+          val = num;
+        }
+      }
+
+      // Coerce boolean strings
+      if (expected === 'boolean' && typeof val === 'string') {
+        const lower = val.toLowerCase();
+        if (lower === 'true') {
+          props[key] = true;
+          val = true;
+        } else if (lower === 'false') {
+          props[key] = false;
+          val = false;
+        }
+      }
+
       if (expected === 'array' && !Array.isArray(val)) {
         errors.push({ path: `${path}.${key}`, message: `Prop "${key}" must be an array`, component_type: type });
       } else if (expected !== 'array' && typeof val !== expected) {
@@ -138,6 +165,8 @@ export class StrictUIValidator implements UIValidator {
 
     switch (type) {
       case 'Card':
+        if (props.padding === undefined) props.padding = 16;
+        if (props.radius === undefined) props.radius = 16;
         checkType('padding', 'number');
         checkType('radius', 'number');
         checkType('background', 'string');
@@ -147,6 +176,7 @@ export class StrictUIValidator implements UIValidator {
 
       case 'Column':
       case 'Row':
+        if (props.gap === undefined) props.gap = 8;
         checkType('gap', 'number');
         checkType('padding', 'number');
         if (props.align && !['start', 'center', 'end', 'stretch'].includes(props.align)) {
@@ -162,9 +192,8 @@ export class StrictUIValidator implements UIValidator {
 
       case 'Text':
         if (props.content === undefined) {
-          errors.push({ path: `${path}.content`, message: 'Prop "content" is required for Text component', component_type: type });
+          props.content = '';
         } else {
-          // Can be string, number or boolean (coerced)
           if (typeof props.content === 'object') {
             errors.push({ path: `${path}.content`, message: 'Prop "content" cannot be an object', component_type: type });
           }
@@ -172,13 +201,13 @@ export class StrictUIValidator implements UIValidator {
         checkType('color', 'string');
         checkType('opacity', 'number');
         if (props.size && !['xs', 'sm', 'md', 'lg', 'xl', '2xl', '3xl'].includes(props.size)) {
-          errors.push({ path: `${path}.size`, message: `Invalid size value: ${props.size}`, component_type: type });
+          props.size = 'md';
         }
         if (props.weight && !['normal', 'medium', 'semibold', 'bold'].includes(props.weight)) {
-          errors.push({ path: `${path}.weight`, message: `Invalid weight value: ${props.weight}`, component_type: type });
+          props.weight = 'normal';
         }
         if (props.align && !['left', 'center', 'right'].includes(props.align)) {
-          errors.push({ path: `${path}.align`, message: `Invalid align value: ${props.align}`, component_type: type });
+          props.align = 'left';
         }
         break;
 
@@ -204,12 +233,12 @@ export class StrictUIValidator implements UIValidator {
 
       case 'Badge':
         if (props.text === undefined) {
-          errors.push({ path: `${path}.text`, message: 'Prop "text" is required for Badge component', component_type: type });
+          props.text = '';
         }
         checkType('color', 'string');
         checkType('background', 'string');
         if (props.size && !['sm', 'md'].includes(props.size)) {
-          errors.push({ path: `${path}.size`, message: `Invalid size value: ${props.size}`, component_type: type });
+          props.size = 'sm';
         }
         break;
 
@@ -218,12 +247,12 @@ export class StrictUIValidator implements UIValidator {
           errors.push({ path: `${path}.value`, message: 'Prop "value" is required for Metric component', component_type: type });
         }
         if (props.label === undefined) {
-          errors.push({ path: `${path}.label`, message: 'Prop "label" is required for Metric component', component_type: type });
+          props.label = '';
         }
         checkType('unit', 'string');
         checkType('valueColor', 'string');
         if (props.size && !['sm', 'md', 'lg'].includes(props.size)) {
-          errors.push({ path: `${path}.size`, message: `Invalid size value: ${props.size}`, component_type: type });
+          props.size = 'md';
         }
         break;
 
@@ -253,13 +282,31 @@ export class StrictUIValidator implements UIValidator {
         break;
 
       case 'WeatherIcon':
-        if (props.code === undefined) {
-          errors.push({ path: `${path}.code`, message: 'Prop "code" is required for WeatherIcon component', component_type: type });
+        if (props.code === undefined || props.code === null) {
+          props.code = 0;
+        } else if (typeof props.code === 'string' && !this.isPlaceholder(props.code)) {
+          const num = Number(props.code);
+          if (!isNaN(num)) {
+            props.code = num;
+          }
         }
-        // code can be a number or string placeholder (placeholder starts with {{)
-        if (typeof props.code !== 'number' && !(typeof props.code === 'string' && props.code.startsWith('{{'))) {
-          errors.push({ path: `${path}.code`, message: 'Prop "code" must be a number', component_type: type });
+        
+        if (!this.isPlaceholder(props.code) && typeof props.code !== 'number') {
+          props.code = 0;
         }
+
+        if (props.isDay === undefined || props.isDay === null) {
+          props.isDay = true;
+        } else if (typeof props.isDay === 'string' && !this.isPlaceholder(props.isDay)) {
+          const lower = props.isDay.toLowerCase();
+          if (lower === 'true') props.isDay = true;
+          else if (lower === 'false') props.isDay = false;
+        }
+
+        if (!this.isPlaceholder(props.isDay) && typeof props.isDay !== 'boolean') {
+          props.isDay = true;
+        }
+
         checkType('size', 'number');
         checkType('isDay', 'boolean');
         break;

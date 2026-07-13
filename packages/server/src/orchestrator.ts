@@ -13,6 +13,7 @@ import type {
 import { PluginRegistry } from './registry.js';
 import { LLM1Router } from './llm1-router.js';
 import { LLM2Planner } from './llm2-planner.js';
+import { LLM2BDecisionPlanner } from './llm2b-decision-planner.js';
 import { OpenMeteoExecutor } from './tool-executor.js';
 import { TopoVariableResolver, PlaceholderSubstituter } from './variable-resolver.js';
 import { COMPONENT_CATALOG } from './component-catalog.js';
@@ -91,6 +92,22 @@ const DEFAULT_TOOLS: ToolDefinition[] = [
   },
 ];
 
+function getStructure(val: any): any {
+  if (val === null || val === undefined) return 'null';
+  if (Array.isArray(val)) {
+    if (val.length === 0) return [];
+    return [getStructure(val[0])];
+  }
+  if (typeof val === 'object') {
+    const struct: Record<string, any> = {};
+    for (const [k, v] of Object.entries(val)) {
+      struct[k] = getStructure(v);
+    }
+    return struct;
+  }
+  return typeof val;
+}
+
 export class WidgetOrchestrator {
   private provider: LLMProvider;
   private registry: PluginRegistry;
@@ -98,6 +115,7 @@ export class WidgetOrchestrator {
   private resolver: TopoVariableResolver;
   private router: LLM1Router;
   private planner: LLM2Planner;
+  private decisionPlanner: LLM2BDecisionPlanner;
   private layoutGen: LLM3Layout;
   private validator: StrictUIValidator;
 
@@ -109,6 +127,7 @@ export class WidgetOrchestrator {
     
     this.router = new LLM1Router(this.provider);
     this.planner = new LLM2Planner(this.provider, this.registry, this.executor);
+    this.decisionPlanner = new LLM2BDecisionPlanner(this.provider, this.registry, this.executor);
     this.layoutGen = new LLM3Layout(this.provider);
     this.validator = new StrictUIValidator();
   }
@@ -132,11 +151,29 @@ export class WidgetOrchestrator {
       const toolsList = await this.registry.listTools();
       const assetsList = await this.registry.listAssets();
 
+      // Map details to unique coarse domain paths
+      const mapToCoarse = (items: any[]) => {
+        const unique = new Map<string, any>();
+        for (const item of items) {
+          const parts = item.path.replace(/^\//, '').split('/');
+          if (parts.length < 2) continue;
+          const domainPath = `/${parts[0]}/${parts[1]}`;
+          if (!unique.has(domainPath)) {
+            unique.set(domainPath, {
+              path: domainPath,
+              name: parts[1],
+              description: `Plugin capabilities for the ${parts[1]} domain.`,
+            });
+          }
+        }
+        return Array.from(unique.values());
+      };
+
       const routerInput = {
         user_query: userQuery,
-        skills: skillsList,
-        tools: toolsList,
-        assets: assetsList,
+        skills: mapToCoarse(skillsList),
+        tools: mapToCoarse(toolsList),
+        assets: mapToCoarse(assetsList),
       };
 
       const routerOutput = await this.router.route(routerInput);
@@ -151,27 +188,36 @@ export class WidgetOrchestrator {
         ]
       };
 
-      if (routerOutput.clarification_required) {
-        const result = {
-          success: false,
-          error: routerOutput.reason || 'Clarification required.',
-          debug: debug as DebugTrace,
-        };
-        logPipeline(userQuery, false, Date.now() - startTime, result.error, debug);
-        return result;
-      }
+
 
       // 2. Variable Planner (LLM-2)
       const plannerStart = Date.now();
-      const domainToolDefs = this.registry.getDomainToolDefinitions(routerOutput.selected_paths.tools);
       
-      const plannerOutput = await this.planner.plan({
-        user_query: userQuery,
-        domain: routerOutput.domain,
-        selected_paths: routerOutput.selected_paths,
-        default_tools: DEFAULT_TOOLS,
-        domain_tools: domainToolDefs,
-      });
+      // Load all tools for the routed domain tools (e.g. /tool/weather loads all weather tools)
+      const domainToolDefs = this.registry.getDomainToolDefinitions(routerOutput.selected_paths.tools);
+      const domain = routerOutput.selected_paths.skills[0]?.replace(/^\//, '').split('/')[1] || 'unknown';
+      
+      let plannerOutput;
+      const useDecisionPlanner = routerOutput.is_decision_query || domain === 'general';
+      if (useDecisionPlanner) {
+        console.log(`Routing query to Decision Agent (LLM-2B) [domain: ${domain}]: ${userQuery}`);
+        plannerOutput = await this.decisionPlanner.plan({
+          user_query: userQuery,
+          domain: domain,
+          selected_paths: routerOutput.selected_paths,
+          default_tools: DEFAULT_TOOLS,
+          domain_tools: domainToolDefs,
+        });
+      } else {
+        console.log(`Routing query to Variable Planner (LLM-2) [domain: ${domain}]: ${userQuery}`);
+        plannerOutput = await this.planner.plan({
+          user_query: userQuery,
+          domain: domain,
+          selected_paths: routerOutput.selected_paths,
+          default_tools: DEFAULT_TOOLS,
+          domain_tools: domainToolDefs,
+        });
+      }
 
       const plannerDuration = Date.now() - plannerStart;
       debug.steps!.planner = {
@@ -195,27 +241,7 @@ export class WidgetOrchestrator {
       // 3. Load Assets
       const assetData = await this.registry.loadAssets(plannerOutput.assets);
 
-      // 4. Layout Generator (LLM-3) - Generate Templated Layout with Placeholders
-      let layoutDuration = 0;
-      let layoutOutput: any = null;
-      let validationResult: any = null;
-      let retries = 0;
-      const MAX_RETRIES = 2;
-
-      const variableDefs = plannerOutput.variables.map(v => ({
-        name: v.variable_name,
-        type: v.variable_type,
-        description: v.description,
-      }));
-
-      let layoutInput = {
-        user_query: userQuery,
-        variable_definitions: variableDefs,
-        assets: assetData,
-        component_catalog: COMPONENT_CATALOG,
-      };
-
-      // 5. Variable Resolver (fetch data)
+      // 4. Variable Resolver (fetch data)
       const resolverStart = Date.now();
       const resolvedVariables = await this.resolver.resolve({
         variables: plannerOutput.variables,
@@ -228,6 +254,36 @@ export class WidgetOrchestrator {
         tool_calls: executedCalls,
         resolved_variables: resolvedVariables,
         duration_ms: resolverDuration,
+      };
+
+      // 5. Layout Generator Setup (LLM-3) - Generate Templated Layout with Placeholders
+      let layoutDuration = 0;
+      let layoutOutput: any = null;
+      let validationResult: any = null;
+      let retries = 0;
+      const MAX_RETRIES = 2;
+
+      const variableDefs = plannerOutput.variables.map(v => {
+        const resolvedVal = resolvedVariables[v.variable_name];
+        return {
+          name: v.variable_name,
+          type: v.variable_type,
+          semantic_type: v.semantic_type,
+          description: v.description,
+          structure: (resolvedVal !== undefined && resolvedVal !== null) ? getStructure(resolvedVal) : undefined,
+          source_info: v.source ? {
+            type: v.source.type,
+            tool_path: v.source.tool_path,
+            parameters: v.source.parameters,
+          } : undefined,
+        };
+      });
+
+      let layoutInput = {
+        user_query: userQuery,
+        variable_definitions: variableDefs,
+        assets: assetData,
+        component_catalog: COMPONENT_CATALOG,
       };
 
       const substituter = new PlaceholderSubstituter();
