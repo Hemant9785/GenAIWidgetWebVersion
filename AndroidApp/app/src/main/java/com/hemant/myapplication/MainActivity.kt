@@ -2,6 +2,7 @@ package com.hemant.myapplication
 
 import android.content.Context
 import android.os.Bundle
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -56,8 +57,8 @@ class MainActivity : ComponentActivity() {
 fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val sharedPref = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    
-    var apiKey by remember { mutableStateOf(sharedPref.getString("openai_api_key", "").orEmpty()) }
+    val defaultKey = ""
+    var apiKey by remember { mutableStateOf(sharedPref.getString("openai_api_key", "").orEmpty().ifBlank { defaultKey }) }
     var prompt by remember { mutableStateOf("tomorrow will there be rain in Bangalore") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
@@ -179,15 +180,16 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
                         scope.launch(Dispatchers.IO) {
                             try {
                                 // Execute full on-device orchestrator pipeline (Router -> Planner loop -> Resolver -> Layout Gen)
-                                val orchestrator = Orchestrator(apiKey)
-                                val (doc, snap) = orchestrator.generate(prompt)
-                                
-                                withContext(Dispatchers.Main) {
-                                    generatedDoc = doc
-                                    snapshot = snap
-                                    isLoading = false
-                                }
+                                 val orchestrator = Orchestrator(apiKey)
+                                 val (doc, snap) = orchestrator.generate(prompt)
+                                 Log.d("HEMANT_DBG", "MainActivity: Pipeline finished. Widget ID='${doc.id}', Title='${doc.title}', State='${snap.stateKey()}'")
+                                 withContext(Dispatchers.Main) {
+                                     generatedDoc = doc
+                                     snapshot = snap
+                                     isLoading = false
+                                 }
                             } catch (e: Exception) {
+                                Log.e("HEMANT_DBG", "Dashboard query failed", e)
                                 withContext(Dispatchers.Main) {
                                     errorMessage = e.message ?: "Failed to generate widget"
                                     isLoading = false
@@ -250,6 +252,7 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
             val doc = generatedDoc
             val snap = snapshot
             if (doc != null && snap != null) {
+                Log.d("HEMANT_DBG", "MainActivity: doc and snap are non-null. Composing GenWidgetSurface.")
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -265,6 +268,7 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
                     )
                 }
             } else {
+                Log.d("HEMANT_DBG", "MainActivity: doc or snap is null. Showing empty state. docIsNull=${doc == null}, snapIsNull=${snap == null}")
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)

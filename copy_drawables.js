@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 const srcDir = 'D:\\widget\\v1\\widget\\gen-ui-forge-rendering-assets\\src\\main\\res\\drawable';
-const destDir = 'D:\\widget\\v2\\AndroidApp\\app\\src\main\\res\\drawable';
+const destDir = 'D:\\widget\\v2\\AndroidApp\\app\\src\\main\\res\\drawable';
 
 if (!fs.existsSync(srcDir)) {
   console.error(`Source directory not found: ${srcDir}`);

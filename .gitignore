@@ -9,7 +9,31 @@ node_modules/
 **/node_modules/
 
 # Android app (excluded from deployment repository)
-/AndroidApp/
+
+# Android/Gradle generated files
+**/.gradle/
+**/.kotlin/
+**/build/
+**/.cxx/
+**/.externalNativeBuild/
+**/local.properties
+
+# Android Studio user-specific files
+**/.idea/
+*.iml
+
+# Android build packages
+*.apk
+*.aab
+
+# Native/debug artifacts
+*.hprof
+captures/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+*.swp
 
 # Build outputs and logs
 dist/
