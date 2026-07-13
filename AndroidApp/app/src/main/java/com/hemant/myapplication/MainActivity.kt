@@ -1,6 +1,5 @@
 package com.hemant.myapplication
 
-import android.content.Context
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
@@ -12,7 +11,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -21,10 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,10 +50,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
-    val context = LocalContext.current
-    val sharedPref = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    val defaultKey = ""
-    var apiKey by remember { mutableStateOf(sharedPref.getString("openai_api_key", "").orEmpty().ifBlank { defaultKey }) }
+    val apiKey = BuildConfig.OPENAI_API_KEY
     var prompt by remember { mutableStateOf("tomorrow will there be rain in Bangalore") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
@@ -93,43 +85,6 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(horizontal = 8.dp)
         )
-        
-        // Settings Card
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Text(
-                    text = "Developer Credentials",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    color = Color.White
-                )
-                
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { 
-                        apiKey = it
-                        sharedPref.edit().putString("openai_api_key", it).apply()
-                    },
-                    label = { Text("OpenAI API Key", color = Color(0xFF94A3B8)) },
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = Color(0xFF0284C7),
-                        unfocusedBorderColor = Color(0xFF475569)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-        }
         
         // Generator Panel Card
         Card(
