@@ -33,6 +33,8 @@ class GenericDomainAdapter : DomainAdapter {
 
     override fun readTool(toolPath: String): JSONObject = JSONObject()
 
+    override fun readToolResponseSchema(toolPath: String): JSONObject = JSONObject()
+
     override suspend fun executeTool(toolPath: String, params: JSONObject): JSONObject {
         val model = params.optJSONObject("model") ?: JSONObject()
         return JSONObject().put("model", model)

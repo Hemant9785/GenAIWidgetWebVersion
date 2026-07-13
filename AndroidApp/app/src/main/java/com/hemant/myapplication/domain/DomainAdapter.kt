@@ -17,5 +17,6 @@ interface DomainAdapter {
     fun getAssets(): List<AssetSummary>
     
     fun readTool(toolPath: String): JSONObject
+    fun readToolResponseSchema(toolPath: String): JSONObject
     suspend fun executeTool(toolPath: String, params: JSONObject): JSONObject
 }

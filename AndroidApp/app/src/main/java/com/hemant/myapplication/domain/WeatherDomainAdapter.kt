@@ -84,6 +84,38 @@ class WeatherDomainAdapter : DomainAdapter {
         }
     }
 
+    override fun readToolResponseSchema(toolPath: String): JSONObject {
+        return when (toolPath) {
+            "/tool/weather/geocode" -> JSONObject()
+                .put("type", "object")
+                .put("properties", JSONObject()
+                    .put("latitude", JSONObject().put("type", "number").put("description", "Latitude coordinate"))
+                    .put("longitude", JSONObject().put("type", "number").put("description", "Longitude coordinate"))
+                    .put("name", JSONObject().put("type", "string").put("description", "City name"))
+                    .put("country", JSONObject().put("type", "string").put("description", "Country name"))
+                )
+            "/tool/weather/forecast" -> JSONObject()
+                .put("type", "object")
+                .put("properties", JSONObject()
+                    .put("model", JSONObject().put("type", "object").put("properties", JSONObject()
+                        .put("weather", JSONObject().put("type", "object").put("properties", JSONObject()
+                            .put("location", JSONObject().put("type", "string"))
+                            .put("country", JSONObject().put("type", "string"))
+                            .put("temperatureText", JSONObject().put("type", "string"))
+                            .put("condition", JSONObject().put("type", "string"))
+                            .put("conditionIcon", JSONObject().put("type", "string"))
+                            .put("humidityText", JSONObject().put("type", "string"))
+                            .put("windText", JSONObject().put("type", "string"))
+                            .put("rainChanceText", JSONObject().put("type", "string"))
+                            .put("hourlyItemsToday", JSONObject().put("type", "array"))
+                            .put("dailyItemsWeek", JSONObject().put("type", "array"))
+                        ))
+                    ))
+                )
+            else -> JSONObject()
+        }
+    }
+
     override suspend fun executeTool(toolPath: String, params: JSONObject): JSONObject {
         val client = OpenMeteoClient()
         return when (toolPath) {

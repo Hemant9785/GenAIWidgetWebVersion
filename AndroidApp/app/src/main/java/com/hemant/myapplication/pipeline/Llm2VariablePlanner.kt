@@ -1,14 +1,15 @@
 package com.hemant.myapplication.pipeline
 
 import com.hemant.myapplication.domain.DomainAdapter
-import com.hemant.myapplication.domain.DomainRegistry
 import com.hemant.myapplication.util.HttpUtil
 import org.json.JSONArray
 import org.json.JSONObject
 
 class Llm2VariablePlanner(private val apiKey: String) {
+    private val messages = ArrayList<JSONObject>()
+
     @Throws(Exception::class)
-    suspend fun plan(userQuery: String, routerOutput: RouterOutput, adapter: DomainAdapter): VariablePlan {
+    suspend fun planInitial(userQuery: String, routerOutput: RouterOutput, adapter: DomainAdapter): VariablePlan {
         if (routerOutput.domain == "generic") {
             val mockPlan = JSONObject()
                 .put("status", "finish")
@@ -22,72 +23,30 @@ class Llm2VariablePlanner(private val apiKey: String) {
             return parsePlan(mockPlan)
         }
 
-        // Initialize default tools JSONDefinitions
-        val toolDefinitions = JSONArray()
-        toolDefinitions.put(JSONObject()
-            .put("type", "function")
-            .put("function", JSONObject()
-                .put("name", "list_skills")
-                .put("description", "List available skills supported by a domain.")
-                .put("parameters", JSONObject()
-                    .put("type", "object")
-                    .put("properties", JSONObject().put("domain", JSONObject().put("type", "string")))
-                    .put("required", JSONArray().put("domain"))
-                )
-            )
-        )
-        toolDefinitions.put(JSONObject()
-            .put("type", "function")
-            .put("function", JSONObject()
-                .put("name", "list_tools")
-                .put("description", "List available tools supported by a domain.")
-                .put("parameters", JSONObject()
-                    .put("type", "object")
-                    .put("properties", JSONObject().put("domain", JSONObject().put("type", "string")))
-                    .put("required", JSONArray().put("domain"))
-                )
-            )
-        )
-        toolDefinitions.put(JSONObject()
-            .put("type", "function")
-            .put("function", JSONObject()
-                .put("name", "read_tool")
-                .put("description", "Read parameter schema details of a specific tool.")
-                .put("parameters", JSONObject()
-                    .put("type", "object")
-                    .put("properties", JSONObject().put("path", JSONObject().put("type", "string")))
-                    .put("required", JSONArray().put("path"))
-                )
-            )
-        )
-
-        // Inject domain specific tools dynamically (mapping /tool/weather/geocode -> tool__weather__geocode)
-        adapter.getTools().forEach { tool ->
-            val functionName = tool.path.substring(1).replace("/", "__")
-            val schema = adapter.readTool(tool.path)
-            toolDefinitions.put(JSONObject()
-                .put("type", "function")
-                .put("function", JSONObject()
-                    .put("name", functionName)
-                    .put("description", tool.description)
-                    .put("parameters", schema)
-                )
-            )
+        // Dynamically discover parameter and response schemas for all domain tools
+        val toolsList = adapter.getTools()
+        val toolsSchemaBuilder = StringBuilder()
+        for (tool in toolsList) {
+            val paramSchema = adapter.readTool(tool.path)
+            val returnSchema = adapter.readToolResponseSchema(tool.path)
+            toolsSchemaBuilder.append("- Tool Path: \"${tool.path}\"\n")
+            toolsSchemaBuilder.append("  Name: \"${tool.name}\"\n")
+            toolsSchemaBuilder.append("  Description: \"${tool.description}\"\n")
+            toolsSchemaBuilder.append("  Parameter Schema: ${paramSchema.toString(2)}\n")
+            toolsSchemaBuilder.append("  Response/Return Schema: ${returnSchema.toString(2)}\n\n")
         }
 
         val systemPrompt = """
-            You are the Variable Planner for a plugin-based dynamic widget platform.
-            Your task is to plan the variables and static assets required to render a user widget.
+            You are the Variable Planner (LLM-2) for a plugin-based dynamic widget platform.
+            Your task is to analyze the user's query and define a structured plan containing variables and static assets required to render the widget.
             
-            You must determine:
-            1. What data (variables) needs to be fetched, and which backend tools should fetch it.
-            2. What static assets are needed.
+            You should output a declarative dependency graph of variables. Variables can be either "static" (pre-defined values) or "tool" (executed via an MCP tool call).
+            If a variable requires outputs from another variable (like coordinates resolved from a geocoder), refer to that variable's properties using template syntax, e.g. "{{location.latitude}}".
             
-            You should work in an agentic loop:
-            - Discover available skills/tools in the "${routerOutput.domain}" domain using registry tools: "list_skills", "list_tools", "read_tool".
-            - Call geocoding/search tools in this planning phase immediately to resolve location coordinates.
-            - Once resolved, output the final plan.
-            - Define dynamic variables with a tool-backed source (e.g. "/tool/weather/forecast") with parameters referencing location coordinates.
+            DO NOT attempt to call geocoding or forecast tools yourself during planning. Instead, define them as "tool" variables in the plan so the client can resolve them.
+            
+            Here are the dynamic tools available for the selected domain (${routerOutput.domain}):
+            ${toolsSchemaBuilder.toString()}
             
             Format of final plan response:
             {
@@ -97,12 +56,10 @@ class Llm2VariablePlanner(private val apiKey: String) {
                   "variable_name": "location",
                   "variable_type": "object",
                   "source": {
-                    "type": "static",
-                    "value": {
-                      "latitude": 42.3601,
-                      "longitude": -71.0589,
-                      "name": "Boston",
-                      "country": "United States"
+                    "type": "tool",
+                    "tool_path": "/tool/weather/geocode",
+                    "parameters": {
+                      "location": "Boston"
                     }
                   }
                 },
@@ -114,7 +71,9 @@ class Llm2VariablePlanner(private val apiKey: String) {
                     "tool_path": "/tool/weather/forecast",
                     "parameters": {
                       "latitude": "{{location.latitude}}",
-                      "longitude": "{{location.longitude}}"
+                      "longitude": "{{location.longitude}}",
+                      "name": "{{location.name}}",
+                      "country": "{{location.country}}"
                     }
                   }
                 }
@@ -122,103 +81,54 @@ class Llm2VariablePlanner(private val apiKey: String) {
               "assets": ["/asset/weather/icons"]
             }
             
-            Current Domain: ${routerOutput.domain}
+            Make sure to return ONLY a valid JSON object matching the schema above.
         """.trimIndent()
 
-        val messages = ArrayList<JSONObject>()
+        messages.clear()
         messages.add(JSONObject().put("role", "system").put("content", systemPrompt))
         messages.add(JSONObject().put("role", "user").put("content", "Analyze this query and create a variable plan: \"$userQuery\""))
 
-        val maxIterations = 8
-        for (iteration in 0 until maxIterations) {
-            val requestBody = JSONObject()
-                .put("model", "gpt-4o")
-                .put("messages", JSONArray(messages))
-                .put("temperature", 0.1)
-                .put("tools", toolDefinitions)
+        return executeLlmRequest()
+    }
 
-            val payloadStr = requestBody.toString()
-            android.util.Log.d("llm_dbg", "LLM-2 Variable Planner Request (Iteration $iteration):\n$payloadStr")
-            val responseStr = HttpUtil.post(
-                urlStr = "https://api.openai.com/v1/chat/completions",
-                jsonPayload = payloadStr,
-                apiKey = apiKey,
-                connectTimeoutMs = 30000,
-                readTimeoutMs = 300000
-            )
-            android.util.Log.d("llm_dbg", "LLM-2 Variable Planner Response (Iteration $iteration):\n$responseStr")
+    @Throws(Exception::class)
+    suspend fun planCorrection(errorMsg: String, adapter: DomainAdapter): VariablePlan {
+        messages.add(JSONObject().put("role", "user").put("content", "The variable plan failed to resolve: $errorMsg. Please identify what went wrong, correct the variables or tool parameter bindings, and output a corrected JSON plan matching the schema."))
+        return executeLlmRequest()
+    }
 
-            val responseJson = JSONObject(responseStr)
-            val choice = responseJson.getJSONArray("choices").getJSONObject(0)
-            val assistantMessage = choice.getJSONObject("message")
-            val toolCalls = assistantMessage.optJSONArray("tool_calls")
+    private suspend fun executeLlmRequest(): VariablePlan {
+        val requestBody = JSONObject()
+            .put("model", "gpt-4o")
+            .put("messages", JSONArray(messages))
+            .put("temperature", 0.1)
+            .put("response_format", JSONObject().put("type", "json_object"))
 
-            messages.add(assistantMessage)
+        val payloadStr = requestBody.toString()
+        android.util.Log.d("llm_dbg", "LLM-2 Variable Planner Request:\n$payloadStr")
+        val responseStr = HttpUtil.post(
+            urlStr = "https://api.openai.com/v1/chat/completions",
+            jsonPayload = payloadStr,
+            apiKey = apiKey,
+            connectTimeoutMs = 30000,
+            readTimeoutMs = 300000
+        )
+        android.util.Log.d("llm_dbg", "LLM-2 Variable Planner Response:\n$responseStr")
 
-            if (toolCalls == null || toolCalls.length() == 0) {
-                var content = assistantMessage.optString("content", "{}").trim()
-                val firstBrace = content.indexOf('{')
-                val lastBrace = content.lastIndexOf('}')
-                if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
-                    content = content.substring(firstBrace, lastBrace + 1)
-                }
-                return parsePlan(JSONObject(content.trim()))
-            }
+        val responseJson = JSONObject(responseStr)
+        val choice = responseJson.getJSONArray("choices").getJSONObject(0)
+        val assistantMessage = choice.getJSONObject("message")
+        
+        // Save the assistant message into conversation history
+        messages.add(assistantMessage)
 
-            for (i in 0 until toolCalls.length()) {
-                val toolCall = toolCalls.getJSONObject(i)
-                val callId = toolCall.getString("id")
-                val fn = toolCall.getJSONObject("function")
-                val fnName = fn.getString("name")
-                val fnArgs = JSONObject(fn.optString("arguments", "{}"))
-
-                val result = try {
-                    when {
-                        fnName == "list_skills" -> {
-                            val domainName = fnArgs.optString("domain", routerOutput.domain)
-                            val targetAdapter = DomainRegistry.getAdapter(domainName)
-                            val skillsArray = JSONArray()
-                            targetAdapter.getSkills().forEach {
-                                skillsArray.put(JSONObject().put("path", it.path).put("name", it.name).put("description", it.description))
-                            }
-                            skillsArray
-                        }
-                        fnName == "list_tools" -> {
-                            val domainName = fnArgs.optString("domain", routerOutput.domain)
-                            val targetAdapter = DomainRegistry.getAdapter(domainName)
-                            val toolsArray = JSONArray()
-                            targetAdapter.getTools().forEach {
-                                toolsArray.put(JSONObject().put("path", it.path).put("name", it.name).put("description", it.description))
-                            }
-                            toolsArray
-                        }
-                        fnName == "read_tool" -> {
-                            val toolPath = fnArgs.getString("path")
-                            val domainName = toolPath.substringAfter("/tool/").substringBefore("/")
-                            val targetAdapter = DomainRegistry.getAdapter(domainName)
-                            targetAdapter.readTool(toolPath)
-                        }
-                        fnName.startsWith("tool__") -> {
-                            // Translate tool__weather__geocode back to /tool/weather/geocode
-                            val toolPath = "/" + fnName.replace("__", "/")
-                            adapter.executeTool(toolPath, fnArgs)
-                        }
-                        else -> JSONObject().put("error", "Unknown function $fnName")
-                    }
-                } catch (e: Exception) {
-                    JSONObject().put("error", e.localizedMessage)
-                }
-
-                messages.add(JSONObject()
-                    .put("role", "tool")
-                    .put("tool_call_id", callId)
-                    .put("name", fnName)
-                    .put("content", result.toString())
-                )
-            }
+        var content = assistantMessage.optString("content", "{}").trim()
+        val firstBrace = content.indexOf('{')
+        val lastBrace = content.lastIndexOf('}')
+        if (firstBrace != -1 && lastBrace != -1 && lastBrace > firstBrace) {
+            content = content.substring(firstBrace, lastBrace + 1)
         }
-
-        throw Exception("Max iterations reached in Variable Planner.")
+        return parsePlan(JSONObject(content.trim()))
     }
 
     private fun parsePlan(json: JSONObject): VariablePlan {

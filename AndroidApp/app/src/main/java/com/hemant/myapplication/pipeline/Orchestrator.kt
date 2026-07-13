@@ -4,6 +4,7 @@ import android.util.Log
 import com.hemant.myapplication.domain.DomainRegistry
 import com.hemant.myapplication.model.RuntimeSnapshot
 import com.hemant.myapplication.model.WidgetDocument
+import org.json.JSONObject
 
 class Orchestrator(private val apiKey: String) {
     companion object {
@@ -26,16 +27,32 @@ class Orchestrator(private val apiKey: String) {
             val adapter = DomainRegistry.getAdapter(routerOutput.domain)
             Log.d(TAG, "Loaded Domain Adapter: ${adapter.domainName()} (category: ${adapter.categoryName()})")
 
-            // 3. LLM-2 Variable Planner (running tool loop with registry and domain tools)
-            Log.d(TAG, "Phase 3: Running Variable Planner (LLM-2) tool loop...")
+            // 3. LLM-2 Variable Planner (running single-turn planner)
+            Log.d(TAG, "Phase 3: Running Variable Planner (LLM-2)")
             val planner = Llm2VariablePlanner(apiKey)
-            val variablePlan = planner.plan(userQuery, routerOutput, adapter)
+            var variablePlan = planner.planInitial(userQuery, routerOutput, adapter)
             Log.d(TAG, "LLM-2 Variable Plan output: status='${variablePlan.status}', variables=${variablePlan.variables.length()} items, assets=${variablePlan.assets}")
 
-            // 4. Variable Resolver (delegates to the active DomainAdapter tool execution)
+            // 4. Variable Resolver (delegates to the active DomainAdapter tool execution, with 3-pass self-correction)
             Log.d(TAG, "Phase 4: Resolving tool-backed variables...")
             val resolver = VariableResolver(adapter)
-            val resolvedValues = resolver.resolve(variablePlan)
+            var resolvedValues = JSONObject()
+            
+            for (attempt in 0 until 3) {
+                try {
+                    resolvedValues = resolver.resolve(variablePlan)
+                    break
+                } catch (e: Exception) {
+                    val errorMsg = e.localizedMessage ?: "Unknown error"
+                    Log.e(TAG, "Resolution failed (attempt ${attempt + 1}/3): $errorMsg")
+                    if (attempt < 2) {
+                        Log.d(TAG, "Triggering LLM-2 planner self-correction...")
+                        variablePlan = planner.planCorrection(errorMsg, adapter)
+                    } else {
+                        throw e
+                    }
+                }
+            }
             Log.d(TAG, "Resolved values: $resolvedValues")
 
             // 5. LLM-3 Layout Generator (produces dynamic A2UI layoutspec)

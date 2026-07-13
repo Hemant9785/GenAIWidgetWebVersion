@@ -50,6 +50,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val apiKey = BuildConfig.OPENAI_API_KEY
     var prompt by remember { mutableStateOf("tomorrow will there be rain in Bangalore") }
     var isLoading by remember { mutableStateOf(false) }
