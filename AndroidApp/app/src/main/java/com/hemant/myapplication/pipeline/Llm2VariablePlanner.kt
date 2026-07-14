@@ -1,21 +1,36 @@
 package com.hemant.myapplication.pipeline
 
 import com.hemant.myapplication.domain.DomainAdapter
+import com.hemant.myapplication.tools.DefaultToolRegistry
 import com.hemant.myapplication.util.HttpUtil
 import org.json.JSONArray
 import org.json.JSONObject
 
 class Llm2VariablePlanner(private val apiKey: String) {
     private val messages = ArrayList<JSONObject>()
+    private val variableNamePattern = Regex("[A-Za-z][A-Za-z0-9_]*")
 
     @Throws(Exception::class)
-    suspend fun planInitial(userQuery: String, routerOutput: RouterOutput, adapter: DomainAdapter): VariablePlan {
+    suspend fun planInitial(
+        userQuery: String,
+        routerOutput: RouterOutput,
+        adapter: DomainAdapter,
+        defaultTools: DefaultToolRegistry,
+    ): VariablePlan {
         // Dynamically discover parameter and response schemas for all domain tools
-        val toolsList = adapter.getTools()
+        val toolsList = defaultTools.getTools() + adapter.getTools()
         val toolsSchemaBuilder = StringBuilder()
         for (tool in toolsList) {
-            val paramSchema = adapter.readTool(tool.path)
-            val returnSchema = adapter.readToolResponseSchema(tool.path)
+            val paramSchema = if (defaultTools.owns(tool.path)) {
+                defaultTools.readTool(tool.path)
+            } else {
+                adapter.readTool(tool.path)
+            }
+            val returnSchema = if (defaultTools.owns(tool.path)) {
+                defaultTools.readToolResponseSchema(tool.path)
+            } else {
+                adapter.readToolResponseSchema(tool.path)
+            }
             toolsSchemaBuilder.append("- Tool Path: \"${tool.path}\"\n")
             toolsSchemaBuilder.append("  Name: \"${tool.name}\"\n")
             toolsSchemaBuilder.append("  Description: \"${tool.description}\"\n")
@@ -35,11 +50,13 @@ class Llm2VariablePlanner(private val apiKey: String) {
             - `variable_type`: string, number, boolean, object, or array.
             - `description`: INTERNAL semantic metadata for the layout generator. Explain what the value represents, its hierarchy, and the best way to visualize it. This description is never user-facing.
             - `presentation_hints`: optional internal hints such as "summary", "comparison", "ranked_list", "timeline", "checklist", "metrics", "cards", or "chips".
+            - `exposure`: `visible` when the value may be included in the runtime model, or `internal` when it is support data used only by another tool. Internal values are never displayed or sent to the layout generator.
 
             Domain-specific guidance:
             ${adapter.getSystemPromptGuidance()}
             
             DO NOT attempt to call geocoding or forecast tools yourself during planning. Instead, define them as "tool" variables in the plan so the client can resolve them.
+            Default tools are available in every domain. Use `/tool/default/current-location` only when a location-aware request has no user-provided location; mark that variable `exposure: "internal"`.
 
             If the selected domain is `generic`, generate the requested information as one or more non-empty STATIC variables using your general knowledge. Use `source.type = "static"` and place user-facing data only in `source.value`. Do not create tool variables for the generic domain. Never present static knowledge as a current, live, or verified fact.
             
@@ -55,11 +72,12 @@ class Llm2VariablePlanner(private val apiKey: String) {
                   "variable_type": "object",
                   "description": "A resolved place used as input for the forecast. It is internal support data and usually does not need its own visual component.",
                   "presentation_hints": ["hidden_support_data"],
+                  "exposure": "internal",
                   "source": {
                     "type": "tool",
                     "tool_path": "/tool/weather/geocode",
                     "parameters": {
-                      "location": "Boston"
+                      "location": "<a location explicitly supplied by the user>"
                     }
                   }
                 },
@@ -68,6 +86,7 @@ class Llm2VariablePlanner(private val apiKey: String) {
                   "variable_type": "object",
                   "description": "Current conditions and forecast collections for a location. Best represented by a prominent temperature summary followed by forecast chips or a compact list.",
                   "presentation_hints": ["summary", "chips"],
+                  "exposure": "visible",
                   "source": {
                     "type": "tool",
                     "tool_path": "/tool/weather/forecast",
@@ -89,6 +108,7 @@ class Llm2VariablePlanner(private val apiKey: String) {
               "variable_type": "array",
               "description": "A comparison of several concepts with a name, strengths, and limitations. Best represented as a compact list or cards.",
               "presentation_hints": ["comparison", "cards"],
+              "exposure": "visible",
               "source": {
                 "type": "static",
                 "value": [
@@ -106,20 +126,24 @@ class Llm2VariablePlanner(private val apiKey: String) {
 
         val initialPlan = executeLlmRequest()
         return try {
-            validatePlan(initialPlan, adapter)
+            validatePlan(initialPlan, adapter, defaultTools)
             initialPlan
         } catch (e: Exception) {
             messages.add(JSONObject().put("role", "user").put("content", "The previous plan was invalid: ${e.message}. Return a corrected plan with the required variable descriptions and valid static/tool sources."))
             val correctedPlan = executeLlmRequest()
-            validatePlan(correctedPlan, adapter)
+            validatePlan(correctedPlan, adapter, defaultTools)
             correctedPlan
         }
     }
 
     @Throws(Exception::class)
-    suspend fun planCorrection(errorMsg: String, adapter: DomainAdapter): VariablePlan {
+    suspend fun planCorrection(
+        errorMsg: String,
+        adapter: DomainAdapter,
+        defaultTools: DefaultToolRegistry,
+    ): VariablePlan {
         messages.add(JSONObject().put("role", "user").put("content", "The variable plan failed to resolve: $errorMsg. Please identify what went wrong, correct the variables or tool parameter bindings, and output a corrected JSON plan matching the schema."))
-        return executeLlmRequest().also { validatePlan(it, adapter) }
+        return executeLlmRequest().also { validatePlan(it, adapter, defaultTools) }
     }
 
     private suspend fun executeLlmRequest(): VariablePlan {
@@ -169,17 +193,26 @@ class Llm2VariablePlanner(private val apiKey: String) {
         )
     }
 
-    private fun validatePlan(plan: VariablePlan, adapter: DomainAdapter) {
+    private fun validatePlan(
+        plan: VariablePlan,
+        adapter: DomainAdapter,
+        defaultTools: DefaultToolRegistry,
+    ) {
         val names = HashSet<String>()
+        val allowedToolPaths = (defaultTools.getTools() + adapter.getTools()).mapTo(HashSet()) { it.path }
         for (index in 0 until plan.variables.length()) {
             val variable = plan.variables.optJSONObject(index)
                 ?: throw Exception("Variable at index $index must be an object")
             val name = variable.optString("variable_name")
-            if (name.isBlank() || !names.add(name)) {
-                throw Exception("Each variable requires a unique non-empty variable_name")
+            if (!variableNamePattern.matches(name) || !names.add(name)) {
+                throw Exception("Each variable requires a unique identifier using letters, numbers, and underscores")
             }
             if (variable.optString("description").isBlank()) {
                 throw Exception("Variable '$name' is missing its internal description")
+            }
+            val exposure = variable.optString("exposure", VariableDefinition.EXPOSURE_VISIBLE).lowercase()
+            if (exposure !in setOf(VariableDefinition.EXPOSURE_VISIBLE, VariableDefinition.EXPOSURE_INTERNAL)) {
+                throw Exception("Variable '$name' has unsupported exposure '$exposure'")
             }
             val source = variable.optJSONObject("source")
                 ?: throw Exception("Variable '$name' is missing source")
@@ -189,6 +222,15 @@ class Llm2VariablePlanner(private val apiKey: String) {
             }
             if (sourceType == "static" && (!source.has("value") || source.isNull("value"))) {
                 throw Exception("Static variable '$name' is missing source.value")
+            }
+            if (sourceType == "tool") {
+                val toolPath = source.optString("tool_path")
+                if (toolPath !in allowedToolPaths) {
+                    throw Exception("Variable '$name' references unavailable tool '$toolPath'")
+                }
+                if (defaultTools.owns(toolPath) && exposure != VariableDefinition.EXPOSURE_INTERNAL) {
+                    throw Exception("Default device tool '$toolPath' must use exposure 'internal'")
+                }
             }
         }
 

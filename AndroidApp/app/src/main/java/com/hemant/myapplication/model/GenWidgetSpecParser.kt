@@ -41,8 +41,6 @@ class GenWidgetSpec(private val root: JSONObject) {
 object GenWidgetDocumentMapper {
     fun fromSpec(spec: GenWidgetSpec): WidgetDocument {
         val metadata = spec.root().optJSONObject("metadata")
-        val preview = spec.root().optJSONObject("preview")
-        val mockData = preview?.optJSONObject("mockData")
         return WidgetDocument(
             id = spec.widgetId(),
             schemaVersion = spec.schemaVersion(),
@@ -50,7 +48,9 @@ object GenWidgetDocumentMapper {
             defaultSize = spec.defaultSize(),
             surfaces = surfaces(spec),
             states = states(spec),
-            previewMockData = mockData,
+            // Preview payloads are intentionally ignored in production. Runtime
+            // snapshots are the sole source of rendered data.
+            previewMockData = null,
         )
     }
 

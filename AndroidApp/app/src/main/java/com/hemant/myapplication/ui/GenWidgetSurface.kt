@@ -65,24 +65,9 @@ fun GenWidgetSurface(
         return
     }
     val values = remember(document, runtimeSnapshot) {
-        val snapValues = runtimeSnapshot?.values() ?: JSONObject()
-        val mockData = document.previewMockData
-        if (mockData != null) {
-            val merged = JSONObject(mockData.toString())
-            val snapModel = snapValues.optJSONObject("model")
-            if (snapModel != null) {
-                val mergedModel = merged.optJSONObject("model") ?: JSONObject()
-                val keys = snapModel.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    mergedModel.put(key, snapModel.opt(key))
-                }
-                merged.put("model", mergedModel)
-            }
-            merged
-        } else {
-            snapValues
-        }
+        // Production rendering must be driven only by the runtime snapshot.
+        // Preview mock data is never allowed to mask missing or failed live data.
+        runtimeSnapshot?.values() ?: JSONObject()
     }
     val context = remember(document, surface, values) {
         ComposeRenderContext(document, surface, values, onAction)
@@ -201,7 +186,7 @@ private fun ComposeText(node: ComponentNode, context: ComposeRenderContext, modi
         color = textColor(node.fieldText("color")),
         fontSize = textSize(node.fieldText("style")),
         fontWeight = textWeight(node.fieldText("style")),
-        maxLines = node.fieldNumber("maxLines")?.toInt() ?: 3,
+        maxLines = (node.fieldNumber("maxLines")?.toInt() ?: 3).coerceIn(1, 4),
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.clickableIfAction(node, context),
     )
@@ -268,7 +253,7 @@ private fun ComposeInsightList(node: ComponentNode, context: ComposeRenderContex
             
     if (sourceArray != null) {
         val visibleItems = runtimeInsightItems(sourceArray)
-            .take(node.fieldNumber("maxItems")?.toInt() ?: 5)
+            .take((node.fieldNumber("maxItems")?.toInt() ?: 5).coerceIn(1, 8))
         if (horizontal) {
             val columns = chipColumns(node, visibleItems.size)
             Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -1,11 +1,16 @@
 package com.hemant.myapplication
 
+import android.Manifest
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -25,7 +30,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.hemant.myapplication.model.RuntimeSnapshot
 import com.hemant.myapplication.model.WidgetDocument
+import com.hemant.myapplication.location.FusedCurrentLocationProvider
+import com.hemant.myapplication.location.LocationPermissionStore
 import com.hemant.myapplication.pipeline.Orchestrator
+import com.hemant.myapplication.tools.DefaultToolRegistry
 import com.hemant.myapplication.ui.GenWidgetSurface
 import com.hemant.myapplication.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.Dispatchers
@@ -52,7 +60,11 @@ class MainActivity : ComponentActivity() {
 fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val apiKey = BuildConfig.OPENAI_API_KEY
-    var prompt by remember { mutableStateOf("tomorrow will there be rain in Bangalore") }
+    val locationPermissionStore = remember(context) { LocationPermissionStore(context) }
+    val defaultTools = remember(context) {
+        DefaultToolRegistry(FusedCurrentLocationProvider(context.applicationContext))
+    }
+    var prompt by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf("") }
     
@@ -60,6 +72,30 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
     var snapshot by remember { mutableStateOf<RuntimeSnapshot?>(null) }
     
     val scope = rememberCoroutineScope()
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(
+                context,
+                "Location was not granted. You can still enter a city for weather.",
+                Toast.LENGTH_LONG,
+            ).show()
+        }
+    }
+
+    // Product requirement: offer the foreground location permission once on
+    // first launch. The provider still checks permission before every use.
+    LaunchedEffect(locationPermissionStore) {
+        val hasPermission = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.ACCESS_COARSE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED
+        if (!hasPermission && !locationPermissionStore.wasInitialPromptShown()) {
+            locationPermissionStore.markInitialPromptShown()
+            locationPermissionLauncher.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
+        }
+    }
     
     Column(
         modifier = modifier
@@ -140,7 +176,7 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
                         scope.launch(Dispatchers.IO) {
                             try {
                                 // Execute full on-device orchestrator pipeline (Router -> Planner loop -> Resolver -> Layout Gen)
-                                 val orchestrator = Orchestrator(apiKey)
+                                 val orchestrator = Orchestrator(apiKey, defaultTools)
                                  val (doc, snap) = orchestrator.generate(prompt)
                                  Log.d("HEMANT_DBG", "MainActivity: Pipeline finished. Widget ID='${doc.id}', Title='${doc.title}', State='${snap.stateKey()}'")
                                  withContext(Dispatchers.Main) {
@@ -233,8 +269,16 @@ fun WidgetCreatorDashboard(modifier: Modifier = Modifier) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text("No widget loaded", color = Color(0xFF64748B), fontSize = 14.sp)
-                    Text("Submit a prompt above to render here", color = Color(0xFF475569), fontSize = 12.sp)
+                    Text(
+                        if (errorMessage.isNotEmpty()) "Live data unavailable" else "No widget loaded",
+                        color = Color(0xFF64748B),
+                        fontSize = 14.sp,
+                    )
+                    Text(
+                        if (errorMessage.isNotEmpty()) "Enter a city or try again" else "Submit a prompt above to render here",
+                        color = Color(0xFF475569),
+                        fontSize = 12.sp,
+                    )
                 }
             }
         }

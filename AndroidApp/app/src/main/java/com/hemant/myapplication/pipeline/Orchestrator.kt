@@ -4,9 +4,13 @@ import android.util.Log
 import com.hemant.myapplication.domain.DomainRegistry
 import com.hemant.myapplication.model.RuntimeSnapshot
 import com.hemant.myapplication.model.WidgetDocument
+import com.hemant.myapplication.tools.DefaultToolRegistry
 import org.json.JSONObject
 
-class Orchestrator(private val apiKey: String) {
+class Orchestrator(
+    private val apiKey: String,
+    private val defaultTools: DefaultToolRegistry,
+) {
     companion object {
         private const val TAG = "HEMANT_DBG"
     }
@@ -18,7 +22,7 @@ class Orchestrator(private val apiKey: String) {
 
             // 1. LLM-1 Capability Router (dynamically lists registry plugin definitions in the prompt)
             Log.d(TAG, "Phase 1: Running Capability Router (LLM-1)")
-            val router = Llm1CapabilityRouter(apiKey)
+            val router = Llm1CapabilityRouter(apiKey, defaultTools)
             val routerOutput = router.route(userQuery)
             Log.d(TAG, "LLM-1 Router Output: domain='${routerOutput.domain}', skills=${routerOutput.skills}, tools=${routerOutput.tools}, decisionQuery=${routerOutput.isDecisionQuery}")
 
@@ -30,12 +34,12 @@ class Orchestrator(private val apiKey: String) {
             // 3. LLM-2 Variable Planner (running single-turn planner)
             Log.d(TAG, "Phase 3: Running Variable Planner (LLM-2)")
             val planner = Llm2VariablePlanner(apiKey)
-            var variablePlan = planner.planInitial(userQuery, routerOutput, adapter)
+            var variablePlan = planner.planInitial(userQuery, routerOutput, adapter, defaultTools)
             Log.d(TAG, "LLM-2 Variable Plan output: status='${variablePlan.status}', variables=${variablePlan.variables.length()} items, assets=${variablePlan.assets}")
 
             // 4. Variable Resolver (delegates to the active DomainAdapter tool execution, with 3-pass self-correction)
             Log.d(TAG, "Phase 4: Resolving tool-backed variables...")
-            val resolver = VariableResolver(adapter)
+            val resolver = VariableResolver(adapter, defaultTools)
             var resolvedData: ResolvedWidgetData? = null
             
             for (attempt in 0 until 3) {
@@ -45,9 +49,18 @@ class Orchestrator(private val apiKey: String) {
                 } catch (e: Exception) {
                     val errorMsg = e.localizedMessage ?: "Unknown error"
                     Log.e(TAG, "Resolution failed (attempt ${attempt + 1}/3): $errorMsg")
+                    // A device-location failure is an environmental/runtime problem, not a
+                    // malformed variable plan. Asking the LLM to "correct" it can cause it
+                    // to substitute an invented city. Stop and ask the user for a city instead.
+                    if (errorMsg.startsWith("Tool '/tool/default/current-location' execution failed:")) {
+                        throw Exception(
+                            "Couldn't get this device's location. Turn on Location and try again, or include a city in your weather question.",
+                            e,
+                        )
+                    }
                     if (attempt < 2) {
                         Log.d(TAG, "Triggering LLM-2 planner self-correction...")
-                        variablePlan = planner.planCorrection(errorMsg, adapter)
+                        variablePlan = planner.planCorrection(errorMsg, adapter, defaultTools)
                     } else {
                         throw e
                     }

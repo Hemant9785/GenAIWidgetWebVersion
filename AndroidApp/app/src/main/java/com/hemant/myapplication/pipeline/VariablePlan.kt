@@ -13,6 +13,7 @@ data class VariableDefinition(
     val type: String,
     val description: String,
     val presentationHints: List<String> = emptyList(),
+    val exposure: String = EXPOSURE_VISIBLE,
 ) {
     fun toJson(): JSONObject {
         val hints = JSONArray()
@@ -22,9 +23,13 @@ data class VariableDefinition(
             .put("variable_type", type)
             .put("description", description)
             .put("presentation_hints", hints)
+            .put("exposure", exposure)
     }
 
     companion object {
+        const val EXPOSURE_VISIBLE = "visible"
+        const val EXPOSURE_INTERNAL = "internal"
+
         fun fromPlanVariable(variable: JSONObject): VariableDefinition {
             val hints = variable.optJSONArray("presentation_hints")
                 ?: variable.optJSONArray("presentationHints")
@@ -36,6 +41,10 @@ data class VariableDefinition(
                     List(array.length()) { index -> array.optString(index) }
                         .filter { it.isNotBlank() }
                 }.orEmpty(),
+                exposure = variable.optString("exposure", EXPOSURE_VISIBLE)
+                    .lowercase()
+                    .takeIf { it in setOf(EXPOSURE_VISIBLE, EXPOSURE_INTERNAL) }
+                    ?: EXPOSURE_VISIBLE,
             )
         }
     }

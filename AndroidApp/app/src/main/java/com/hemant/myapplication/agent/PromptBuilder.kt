@@ -30,10 +30,9 @@ object PromptBuilder {
                 }
               }
             - preview: {
-                "mockData": {
-                   // Mock values representing the resolved model snapshot
-                }
+                "mockData": {}
               }
+            - Preview mock data must remain empty. Live rendering uses only the runtime snapshot.
               
             Component Rules:
             - Every component must have a unique "id" (string), "component" (string, e.g. Column, Row, Text, Icon, Spacer, Divider, Image), "fields" (object of properties), and "children" (array of child component IDs).

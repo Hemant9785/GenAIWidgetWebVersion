@@ -1,6 +1,7 @@
 package com.hemant.myapplication.pipeline
 
 import com.hemant.myapplication.domain.DomainAdapter
+import com.hemant.myapplication.tools.DefaultToolRegistry
 import org.json.JSONObject
 
 data class ResolvedWidgetData(
@@ -8,7 +9,10 @@ data class ResolvedWidgetData(
     val variableDefinitions: List<VariableDefinition>,
 )
 
-class VariableResolver(private val adapter: DomainAdapter) {
+class VariableResolver(
+    private val adapter: DomainAdapter,
+    private val defaultTools: DefaultToolRegistry,
+) {
     private val resolvedMap = HashMap<String, Any>()
     private val resolvingSet = HashSet<String>()
 
@@ -34,7 +38,12 @@ class VariableResolver(private val adapter: DomainAdapter) {
         val model = JSONObject()
         for (name in variablesMap.keys) {
             val value = resolvedMap[name]
-            val sourceType = variablesMap.getValue(name)
+            val variable = variablesMap.getValue(name)
+            val exposure = variable.optString("exposure", VariableDefinition.EXPOSURE_VISIBLE).lowercase()
+            if (exposure == VariableDefinition.EXPOSURE_INTERNAL) {
+                continue
+            }
+            val sourceType = variable
                 .getJSONObject("source")
                 .optString("type")
             if (sourceType == "tool" && value is JSONObject) {
@@ -88,7 +97,11 @@ class VariableResolver(private val adapter: DomainAdapter) {
             val resolvedParams = resolveParameters(rawParams, variablesMap)
 
             // Execute the dynamic domain tool
-            val result = adapter.executeTool(toolPath, resolvedParams)
+            val result = if (defaultTools.owns(toolPath)) {
+                defaultTools.executeTool(toolPath, resolvedParams)
+            } else {
+                adapter.executeTool(toolPath, resolvedParams)
+            }
             if (result.has("error")) {
                 throw Exception("Tool '$toolPath' execution failed: ${result.getString("error")}")
             }

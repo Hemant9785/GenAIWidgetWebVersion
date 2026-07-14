@@ -47,7 +47,7 @@ class Llm3LayoutGenerator(private val apiKey: String) {
                 }
               }
             - preview: {
-                "mockData": $resolvedVariables
+                "mockData": {}
               }
               
             Component Rules:
@@ -74,7 +74,9 @@ class Llm3LayoutGenerator(private val apiKey: String) {
             $variableMetadata
 
             Use the internal descriptions and presentation hints to choose visual hierarchy and component type. They are not user-facing data.
-            NEVER display a variable description or presentation hint as text, a literal string, an action label, or preview data. Bind visible content only to paths that exist in the runtime values above, such as `/model/<variable_name>/...`.
+            NEVER display a variable description or presentation hint as text, a literal string, an action label, or preview data. Definitions with `exposure: "internal"` are private support data: their values are intentionally absent from runtime values and MUST NOT be bound or displayed.
+            Bind visible content only to paths that exist in the runtime values above, such as `/model/<variable_name>/...`.
+            For weather, every city, country, temperature, condition, measurement, date, and forecast item MUST come from a runtime binding. Never write a city or weather fact as a literal string; use literal text only for neutral UI chrome such as "Forecast".
             Do not invent paths, components, or fields outside the supplied catalog.
             
             Few-Shot Flat JSON Examples:
@@ -241,11 +243,33 @@ class Llm3LayoutGenerator(private val apiKey: String) {
             .map { normalize(it.description) }
             .filter { it.length >= 24 }
             .distinct()
-        if (internalDescriptions.isEmpty()) return
+        val internalVariableNames = variableDefinitions
+            .filter { it.exposure == VariableDefinition.EXPOSURE_INTERNAL }
+            .map { it.name }
+            .filter { it.isNotBlank() }
+            .toSet()
+        if (internalDescriptions.isEmpty() && internalVariableNames.isEmpty()) return
 
         fun includesInternalDescription(text: String): Boolean {
             val normalizedText = normalize(text)
             return internalDescriptions.any { description -> normalizedText.contains(description) }
+        }
+
+        fun isInternalPath(path: String): Boolean = internalVariableNames.any { name ->
+            path == "/model/$name" || path.startsWith("/model/$name/")
+        }
+
+        fun inspectExpression(expression: BindingExpr) {
+            when (expression) {
+                is BindingExpr.Path -> require(!isInternalPath(expression.pointer)) {
+                    "Layout attempted to bind internal variable '${expression.pointer}'"
+                }
+                is BindingExpr.LiteralString -> require(!includesInternalDescription(expression.value)) {
+                    "Layout attempted to display internal variable metadata"
+                }
+                is BindingExpr.FormatString -> expression.args.values.forEach(::inspectExpression)
+                else -> Unit
+            }
         }
 
         fun inspect(value: ComponentValue) {
@@ -253,14 +277,9 @@ class Llm3LayoutGenerator(private val apiKey: String) {
                 is ComponentValue.Text -> require(!includesInternalDescription(value.value)) {
                     "Layout attempted to display internal variable metadata"
                 }
-                is ComponentValue.Binding -> {
-                    val expr = value.expr
-                    if (expr is BindingExpr.LiteralString) {
-                        require(!includesInternalDescription(expr.value)) {
-                            "Layout attempted to display internal variable metadata"
-                        }
-                    }
-                }
+                is ComponentValue.Binding -> inspectExpression(value.expr)
+                is ComponentValue.Icon -> value.request.binding?.let(::inspectExpression)
+                is ComponentValue.Action -> value.event.params.values.forEach(::inspect)
                 is ComponentValue.ListValue -> value.values.forEach(::inspect)
                 is ComponentValue.ObjectValue -> value.values.values.forEach(::inspect)
                 else -> Unit
